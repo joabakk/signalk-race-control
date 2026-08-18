@@ -12,10 +12,6 @@
     "node": ">=14"
   },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": ""
-  },
   "dependencies": {
     "exceljs": "^4.4.0"
   }
