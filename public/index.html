@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Race Control</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Race Control</h1>
+    <div class="race-select-row">
+      <select id="raceSelect"></select>
+      <button id="newRaceBtn" class="secondary">+ New Race</button>
+      <button id="exportBtn" class="secondary" hidden>Export to Excel</button>
+      <button id="deleteRaceBtn" class="secondary danger" hidden>Delete Race</button>
+    </div>
+    <div id="newRaceForm" class="new-race-form" hidden>
+      <input type="text" id="newRaceName" placeholder="Race name, e.g. Onsdagsseilas 3" autocomplete="off" />
+      <button id="createRaceBtn">Create</button>
+      <button id="cancelNewRaceBtn" class="secondary">Cancel</button>
+    </div>
+    <div id="raceArea">
+      <div id="clock" class="clock">00:00:00</div>
+      <div class="controls">
+        <button id="startBtn">Start Race</button>
+        <button id="stopBtn" class="secondary" hidden>Stop</button>
+        <button id="resumeBtn" class="secondary" hidden>Resume</button>
+        <button id="resetBtn" class="secondary">Reset</button>
+      </div>
+      <div class="schedule-row">
+        <input type="datetime-local" id="scheduleInput" step="1" />
+        <button id="scheduleBtn" class="secondary">Schedule Start</button>
+        <button id="cancelScheduleBtn" class="secondary" hidden>Cancel Schedule</button>
+      </div>
+      <div class="schedule-row">
+        <input type="datetime-local" id="callOffInput" step="1" />
+        <button id="scheduleCallOffBtn" class="secondary">Schedule Call-off</button>
+        <button id="cancelCallOffBtn" class="secondary" hidden>Cancel Call-off</button>
+      </div>
+    </div>
+    <div id="statusLine" class="status"></div>
+    <div id="vetStatusLine" class="status vet-status">
+      <span id="vetStatusText"></span>
+      <button id="vetRefreshBtn" class="link-btn">Refresh VET register</button>
+    </div>
+  </header>
+  <main>
+    <p id="noRacesMsg" class="empty" hidden>No races yet. Click "+ New Race" to plan one.</p>
+
+    <div id="courseSection" class="course-section" hidden>
+      <button id="courseToggleBtn" type="button" class="link-btn">▸ Course &amp; chart</button>
+      <div id="courseBody" hidden>
+        <div class="course-grid">
+          <div class="course-group">
+            <h3>Start line</h3>
+            <div id="startLineRows"></div>
+          </div>
+          <div class="course-group">
+            <h3>Marks <span class="hint">(in rounding order)</span></h3>
+            <div id="marksRows"></div>
+            <button id="addMarkBtn" type="button" class="secondary">+ Add Mark</button>
+          </div>
+          <div class="course-group">
+            <h3>Finish line</h3>
+            <div id="finishLineRows"></div>
+          </div>
+        </div>
+        <div class="course-actions">
+          <button id="saveCourseBtn" type="button">Save Course</button>
+          <span id="courseStatusText" class="status"></span>
+        </div>
+        <div class="chart-wrap">
+          <svg id="courseChart" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet"></svg>
+          <div id="replayControls" class="replay-controls" hidden>
+            <input type="range" id="replaySlider" min="0" max="100" value="100" />
+            <span id="replayTimeLabel">Live</span>
+            <button id="replayLiveBtn" type="button" class="secondary">Live</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="addBoatRow" class="add-boat-row" hidden>
+      <div class="autocomplete">
+        <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" />
+        <div id="addBoatSuggestions" class="suggestions" hidden></div>
+      </div>
+      <button id="addBoatBtn">Add Boat</button>
+    </div>
+    <div class="table-scroll">
+      <table id="boatsTable">
+        <thead>
+          <tr>
+            <th>Boat</th>
+            <th>MMSI</th>
+            <th>TCF</th>
+            <th id="vetAlternativesTh">VET alternatives</th>
+            <th>Elapsed</th>
+            <th>Corrected</th>
+            <th>Est. finish</th>
+            <th>vs Self</th>
+            <th>Finish time</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="boatsBody"></tbody>
+      </table>
+    </div>
+    <p id="emptyMsg" class="empty" hidden>No boats added yet. Use "Add Boat" above to enter the fleet.</p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
