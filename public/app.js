@@ -665,8 +665,11 @@
         return false;
       }
     }
+    // Don't rows.delete(boatId) here — render()'s own stale-row cleanup
+    // (the `seen` pass below) needs that entry to still be present so it can
+    // actually remove the <tr> from the DOM, not just forget about it and
+    // leave a ghost row behind.
     if (raceState && raceState.boats) delete raceState.boats[boatId];
-    rows.delete(boatId);
     render();
     return true;
   }
