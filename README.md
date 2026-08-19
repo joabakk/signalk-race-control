@@ -7,11 +7,15 @@ and a live projected finishing order — during and after the race.
 - **Named, plannable races** — create races ahead of time, optionally with a
   scheduled start; switch between past and upcoming races from a dropdown to
   review results later. Nothing gets overwritten by starting the next race.
-- **Multi-day races** — check **Multi-day race** when creating one (fixed for that
-  race, not changeable afterward) and finish/start times are entered with a full
-  date, not just a time-of-day — so a boat finishing two calendar days after the gun
-  resolves correctly instead of the usual same-day rollover guess. Elapsed/corrected
-  time already display past 24 hours either way (e.g. `30:00:00`).
+- **Overnight / multi-day races** — most races are same-day, so this is off by
+  default; a normal finish-time entry (like `21:14:07`) already rolls over to the
+  next calendar day on its own if it's earlier than the start, so an ordinary race
+  finishing just after midnight needs nothing special. Check **Overnight / multi-day
+  race** when creating one instead (fixed for that race, not changeable afterward)
+  only once a single automatic day-rollover isn't enough — a multi-day distance
+  race, say — and finish/start times are then entered with a full date, not just a
+  time-of-day. Elapsed/corrected time already display past 24 hours either way (e.g.
+  `30:00:00`).
 - **Individual start times** — override the race's single start time for one boat at
   a time (in its own **Start time** column, right next to Finish time): for a
   staggered/pursuit start, or to correct a boat that didn't actually get away with
@@ -120,9 +124,10 @@ Then restart the SignalK server, enable "Race Control" under
 ## Using it
 
 1. Click **+ New Race**, give it a name (e.g. "Onsdagsseilas 3"), and check
-   **Multi-day race** if it's expected to run more than one day (can't be changed
-   after creating the race). It becomes the active race, shared across every open
-   browser tab/device.
+   **Overnight / multi-day race** only if a single automatic day-rollover on finish
+   times won't be enough (can't be changed after creating the race) — leave it
+   unchecked for the usual same-day race, even one that finishes after midnight. It
+   becomes the active race, shared across every open browser tab/device.
 2. Add boats by name. Each gets a default TCF of 1.0 — edit it directly, or use the
    VET-alternatives dropdown once a matching register entry is found. Set an MMSI per
    boat if you want its AIS position tracked for the chart/estimate.
