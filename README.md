@@ -7,6 +7,17 @@ and a live projected finishing order — during and after the race.
 - **Named, plannable races** — create races ahead of time, optionally with a
   scheduled start; switch between past and upcoming races from a dropdown to
   review results later. Nothing gets overwritten by starting the next race.
+- **Multi-day races** — check **Multi-day race** when creating one (fixed for that
+  race, not changeable afterward) and finish/start times are entered with a full
+  date, not just a time-of-day — so a boat finishing two calendar days after the gun
+  resolves correctly instead of the usual same-day rollover guess. Elapsed/corrected
+  time already display past 24 hours either way (e.g. `30:00:00`).
+- **Individual start times** — override the race's single start time for one boat at
+  a time (in its own **Start time** column, right next to Finish time): for a
+  staggered/pursuit start, or to correct a boat that didn't actually get away with
+  the fleet. Left blank, a boat just uses the race's own start time as before.
+  Starting or resetting the race clears every boat's override along with its finish
+  time, ready for a clean re-run.
 - **Add/remove boats explicitly** — type a name (autocompletes against the VET
   register, the cross-race boat registry, and any live AIS/self vessel — matching
   anywhere in the name, not just the start) and click **Add Boat**. Boats aren't
@@ -72,13 +83,15 @@ and a live projected finishing order — during and after the race.
   finishing instantly), or the current corrected-time gap if both are still racing or
   both have finished.
 - **Export to Excel** — a genuine `.xlsx` snapshot of the current standings (same
-  ranking, same rows as the on-screen table: rank, boat, MMSI, TCF, elapsed,
-  corrected, finish time, status), with the finish-time column rendered in your
-  browser's own timezone rather than the server's.
+  ranking, same rows as the on-screen table: rank, boat, MMSI, TCF, start time,
+  elapsed, corrected, finish time, status), with the time columns rendered in your
+  browser's own timezone rather than the server's (and with the date included, for a
+  multi-day race).
 - **Download Offline Timer** — a single self-contained `.html` file, seeded with the
-  current race's boats and TCF, that runs the core of race timing (start/stop/resume/
-  reset, add/remove boats, edit TCF, record finishes, DNF, self-comparison) with no
-  server and no internet connection at all — a backup for keeping a race running if
+  current race's boats, TCF, and multi-day setting, that runs the core of race timing
+  (start/stop/resume/reset, add/remove boats, edit TCF, individual start times,
+  record finishes, DNF, self-comparison) with no server and no internet connection at
+  all — a backup for keeping a race running if
   this plugin's server becomes unreachable mid-event. It saves everything to that
   browser's own local storage, so closing and reopening the same downloaded file picks
   up right where you left off. AIS boat names/positions, VET-tall lookup, and the
@@ -102,8 +115,10 @@ Then restart the SignalK server, enable "Race Control" under
 
 ## Using it
 
-1. Click **+ New Race**, give it a name (e.g. "Onsdagsseilas 3"). It becomes the
-   active race, shared across every open browser tab/device.
+1. Click **+ New Race**, give it a name (e.g. "Onsdagsseilas 3"), and check
+   **Multi-day race** if it's expected to run more than one day (can't be changed
+   after creating the race). It becomes the active race, shared across every open
+   browser tab/device.
 2. Add boats by name. Each gets a default TCF of 1.0 — edit it directly, or use the
    VET-alternatives dropdown once a matching register entry is found. Set an MMSI per
    boat if you want its AIS position tracked for the chart/estimate.
@@ -111,8 +126,12 @@ Then restart the SignalK server, enable "Race Control" under
    order — reorder with ↑/↓), and finish line, then **Save Course**.
 4. Either click **Start Race** now, or set a date/time and click **Schedule Start** —
    the race starts itself automatically at that moment (even across a server restart).
-5. As boats finish, click **Now** to stamp the current time, or type the exact
-   `HH:MM:SS` into the finish-time field. **Clear** undoes a finish.
+   If a particular boat actually started at a different moment (a staggered/pursuit
+   start, or a correction), set its own time in the **Start time** column instead of
+   leaving it to follow the race's start.
+5. As boats finish, click **Now** to stamp the current time, or type the exact time
+   (plus date, for a multi-day race) into the finish-time field. **Clear** undoes a
+   finish.
 6. **Stop** calls the race off now (freezes the clock, DNFs whoever hasn't finished);
    **Schedule Call-off** does the same at a future time instead. **Resume** discards
    a stop and un-DNFs whoever it DNF'd. **Reset** (click once to arm, again to

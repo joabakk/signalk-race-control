@@ -27,6 +27,7 @@
   const exportOfflineBtn = document.getElementById('exportOfflineBtn');
   const newRaceForm = document.getElementById('newRaceForm');
   const newRaceNameInput = document.getElementById('newRaceName');
+  const newRaceMultiDayInput = document.getElementById('newRaceMultiDay');
   const createRaceBtn = document.getElementById('createRaceBtn');
   const cancelNewRaceBtn = document.getElementById('cancelNewRaceBtn');
   const raceArea = document.getElementById('raceArea');
@@ -115,20 +116,52 @@
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   }
 
-  // Combines a "HH:MM:SS" wall-clock value with the race's start date to get
-  // an absolute timestamp, rolling over to the next day if the entered time
-  // is earlier than the start time (so overnight races finish correctly).
-  function timeInputValueToTs(value) {
+  // Combines a "HH:MM:SS" wall-clock value with a reference date to get an
+  // absolute timestamp. baseTs defaults to the race's start time, or today
+  // if the race hasn't started yet — only meaningful for single-day races; a
+  // multi-day race uses full date+time inputs instead (see
+  // tsToDateTimeInputValue / dateTimeInputValueToTs) so there's never more
+  // than one day's ambiguity to resolve here.
+  //
+  // rollover (default true) pushes the result to the next calendar day when
+  // the entered time is earlier than the reference — correct for a finish
+  // time, which must come after the start it's measured from. A start time
+  // (the race's own, or one boat's individual override) has no such "must
+  // be after" constraint — an earlier clock reading there just means
+  // earlier the same day (e.g. correcting/backdating it, or a pursuit start
+  // where a boat starts before the race's nominal start) — so callers
+  // editing a start time must pass rollover: false.
+  function timeInputValueToTs(value, baseTs, rollover) {
     if (!value) return null;
     const parts = value.split(':').map(Number);
     const [h, m, s] = [parts[0] || 0, parts[1] || 0, parts[2] || 0];
-    const base = raceState && raceState.startTime ? new Date(raceState.startTime) : new Date();
+    const refTs = baseTs != null ? baseTs : raceState && raceState.startTime;
+    const base = refTs ? new Date(refTs) : new Date();
     const d = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, s, 0);
     let ts = d.getTime();
-    if (raceState && raceState.startTime && ts < raceState.startTime) {
+    if (rollover !== false && refTs && ts < refTs) {
       ts += 24 * 3600 * 1000;
     }
     return ts;
+  }
+
+  // YYYY-MM-DDTHH:mm:ss of the given timestamp in local time, for the
+  // per-boat finish/start <input type=datetime-local> used by multi-day
+  // races — datetime-local always means "local time" with no timezone
+  // component, so no explicit offset math is needed here.
+  function tsToDateTimeInputValue(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return (
+      `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` +
+      `T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+    );
+  }
+
+  function dateTimeInputValueToTs(value) {
+    if (!value) return null;
+    const ts = new Date(value).getTime();
+    return isFinite(ts) ? ts : null;
   }
 
   async function fetchJSON(url, opts) {
@@ -357,6 +390,7 @@
   function openNewRaceForm() {
     newRaceForm.hidden = false;
     newRaceNameInput.value = '';
+    newRaceMultiDayInput.checked = false;
     newRaceNameInput.focus();
   }
 
@@ -375,7 +409,7 @@
       const data = await fetchJSON(`${API}/races`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, multiDay: newRaceMultiDayInput.checked })
       });
       activeRaceId = data.race.id;
       closeNewRaceForm();
@@ -646,6 +680,24 @@
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ finishTime: ts })
+        }
+      );
+      raceState.boats[boatId] = boat;
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  async function setStartTime(boatId, ts) {
+    if (!activeRaceId) return;
+    try {
+      const boat = await fetchJSON(
+        `${API}/races/${encodeURIComponent(activeRaceId)}/boats/${encodeURIComponent(boatId)}/startTime`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startTime: ts })
         }
       );
       raceState.boats[boatId] = boat;
@@ -996,9 +1048,14 @@
     const now = raceNow();
     return Object.values(raceState.boats || {})
       .map((b) => {
+        // A boat with its own start time (a staggered/pursuit start, or a
+        // correction) uses that instead of the race's single start time.
+        const start = b.startTime != null ? b.startTime : raceState.startTime;
         // A DNF boat is out of the race — no ticking clock, no rank (sorts
         // to the bottom, same as any other boat with nothing to rank by).
-        const elapsedMs = !b.dnf && raceState.startTime ? (b.finishTime || now) - raceState.startTime : null;
+        // A start time still in the future (e.g. a later pursuit-start
+        // group) means this boat hasn't actually started yet either.
+        const elapsedMs = !b.dnf && start && start <= now ? (b.finishTime || now) - start : null;
         const tcf = b.tcf != null ? b.tcf : 1.0;
         const correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
         const estimate = b.estimate || null;
@@ -1012,6 +1069,7 @@
           name: b.name,
           mmsi: b.mmsi || '',
           tcf,
+          startTime: b.startTime,
           finishTime: b.finishTime,
           dnf: !!b.dnf,
           dnfPosition: b.dnfPosition || null,
@@ -1144,6 +1202,41 @@
     tdVet.hidden = !vetEnabled;
     tdVet.append(vetSelect, vetBadge);
 
+    // A boat's own start time, for a staggered/pursuit start or to correct
+    // a boat that didn't actually start with the fleet — overrides the
+    // race's single start time for this boat only. Blank means "use the
+    // race's start time", same as before this existed.
+    const startTimeInput = document.createElement('input');
+    startTimeInput.type = raceState && raceState.multiDay ? 'datetime-local' : 'time';
+    startTimeInput.step = '1';
+    startTimeInput.className = 'start-time-input';
+    startTimeInput.addEventListener('change', () => {
+      if (!startTimeInput.value) {
+        setStartTime(boatId, null);
+        return;
+      }
+      const ts =
+        raceState && raceState.multiDay
+          ? dateTimeInputValueToTs(startTimeInput.value)
+          : timeInputValueToTs(startTimeInput.value, (raceState && raceState.startTime) || Date.now(), false);
+      setStartTime(boatId, ts);
+    });
+    const startNowBtn = document.createElement('button');
+    startNowBtn.type = 'button';
+    startNowBtn.className = 'finish-now-btn';
+    startNowBtn.textContent = 'Now';
+    startNowBtn.addEventListener('click', () => setStartTime(boatId, Date.now()));
+    const startClearBtn = document.createElement('button');
+    startClearBtn.type = 'button';
+    startClearBtn.className = 'finish-clear-btn';
+    startClearBtn.textContent = 'Clear';
+    startClearBtn.addEventListener('click', () => setStartTime(boatId, null));
+    const startWrap = document.createElement('div');
+    startWrap.className = 'finish-cell';
+    startWrap.append(startTimeInput, startNowBtn, startClearBtn);
+    const tdStart = document.createElement('td');
+    tdStart.appendChild(startWrap);
+
     const tdElapsed = document.createElement('td');
     const tdCorrected = document.createElement('td');
     const tdEstFinish = document.createElement('td');
@@ -1152,11 +1245,18 @@
     tdVsSelf.className = 'vs-self';
 
     const finishTimeInput = document.createElement('input');
-    finishTimeInput.type = 'time';
+    finishTimeInput.type = raceState && raceState.multiDay ? 'datetime-local' : 'time';
     finishTimeInput.step = '1';
     finishTimeInput.className = 'finish-time-input';
     finishTimeInput.addEventListener('change', () => {
-      const ts = finishTimeInput.value ? timeInputValueToTs(finishTimeInput.value) : null;
+      if (!finishTimeInput.value) {
+        setFinishTime(boatId, null);
+        return;
+      }
+      const ts =
+        raceState && raceState.multiDay
+          ? dateTimeInputValueToTs(finishTimeInput.value)
+          : timeInputValueToTs(finishTimeInput.value);
       setFinishTime(boatId, ts);
     });
 
@@ -1213,7 +1313,7 @@
     const tdRemove = document.createElement('td');
     tdRemove.appendChild(removeBtn);
 
-    tr.append(tdName, tdMmsi, tdTcf, tdVet, tdElapsed, tdCorrected, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
+    tr.append(tdName, tdMmsi, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
 
     return {
       tr,
@@ -1225,6 +1325,9 @@
       tcfInput,
       vetSelect,
       vetBadge,
+      startTimeInput,
+      startNowBtn,
+      startClearBtn,
       tdElapsed,
       tdCorrected,
       finishNormalWrap,
@@ -1393,6 +1496,13 @@
         row.vetHandicapVersion = handicapVersion;
       }
       syncVetSelectValue(row, b.tcf);
+      if (document.activeElement !== row.startTimeInput) {
+        row.startTimeInput.value = raceState.multiDay ? tsToDateTimeInputValue(b.startTime) : tsToTimeInputValue(b.startTime);
+      }
+      const canStart = !!raceState.startTime;
+      row.startTimeInput.disabled = !canStart;
+      row.startNowBtn.disabled = !canStart;
+      row.startClearBtn.disabled = !canStart || !b.startTime;
       row.tdElapsed.textContent = fmtDuration(b.elapsedMs);
       row.tdCorrected.textContent = fmtDuration(b.correctedMs);
 
@@ -1441,7 +1551,9 @@
           : 'position unknown';
       } else {
         if (document.activeElement !== row.finishTimeInput) {
-          row.finishTimeInput.value = tsToTimeInputValue(b.finishTime);
+          row.finishTimeInput.value = raceState.multiDay
+            ? tsToDateTimeInputValue(b.finishTime)
+            : tsToTimeInputValue(b.finishTime);
         }
         const canFinish = !!raceState.startTime;
         row.finishTimeInput.disabled = !canFinish;

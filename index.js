@@ -158,11 +158,21 @@ function ensureRaceShape(race) {
   if (race.selfBoatId === undefined) race.selfBoatId = null;
   if (race.stopTime === undefined) race.stopTime = null;
   if (race.scheduledCallOff === undefined) race.scheduledCallOff = null;
+  if (race.multiDay === undefined) race.multiDay = false;
   Object.values(race.boats).forEach((b) => {
     if (!b.track) b.track = [];
     if (b.dnf === undefined) b.dnf = false;
     if (b.dnfPosition === undefined) b.dnfPosition = null;
+    if (b.startTime === undefined) b.startTime = null;
   });
+}
+
+// A boat with its own start time (a staggered/pursuit start, or a
+// correction for a boat that didn't actually start with the fleet) uses
+// that instead of the race's single start time — everyone else still just
+// uses race.startTime, unchanged from before this existed.
+function effectiveStartTime(race, boat) {
+  return boat.startTime != null ? boat.startTime : race.startTime;
 }
 
 const EARTH_RADIUS_NM = 3440.065;
@@ -1126,7 +1136,8 @@ module.exports = function (app) {
   // everything after it) is still counted as ahead of it. Only offered when
   // there's a finish line, a live position, and a non-trivial speed.
   function estimateFinish(race, boat) {
-    if (!race.startTime || boat.finishTime || boat.dnf || race.stopTime) return null;
+    const start = effectiveStartTime(race, boat);
+    if (!start || start > Date.now() || boat.finishTime || boat.dnf || race.stopTime) return null;
     if (!race.course || !race.course.finishLine) return null;
     const live = getLivePosition(boat.mmsi);
     if (!live || live.sogMs == null || live.sogMs < 0.25) return null;
@@ -1135,7 +1146,7 @@ module.exports = function (app) {
     const sogKn = live.sogMs * MS_TO_KNOTS;
     const hoursRemaining = remaining.nm / sogKn;
     const estFinishTime = Date.now() + hoursRemaining * 3600 * 1000;
-    const estElapsedMs = estFinishTime - race.startTime;
+    const estElapsedMs = estFinishTime - start;
     const tcf = boat.tcf != null ? boat.tcf : 1.0;
     return {
       remainingNm: Math.round(remaining.nm * 100) / 100,
@@ -1165,7 +1176,8 @@ module.exports = function (app) {
     const now = race.stopTime || Date.now();
     return Object.values(race.boats)
       .map((boat) => {
-        const elapsedMs = !boat.dnf && race.startTime ? (boat.finishTime || now) - race.startTime : null;
+        const start = effectiveStartTime(race, boat);
+        const elapsedMs = !boat.dnf && start && start <= now ? (boat.finishTime || now) - start : null;
         const tcf = boat.tcf != null ? boat.tcf : 1.0;
         const correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
         const estimate = estimateFinish(race, boat);
@@ -1271,6 +1283,7 @@ module.exports = function (app) {
     race.scheduledCallOff = null;
     Object.values(race.boats).forEach((b) => {
       b.finishTime = null;
+      b.startTime = null;
       b.track = [];
       b.dnf = false;
       b.dnfPosition = null;
@@ -1402,6 +1415,10 @@ module.exports = function (app) {
         startTime: null,
         stopTime: null,
         scheduledCallOff: null,
+        // Fixed at creation, not editable afterward — switching it mid-race
+        // would leave already-entered time-only finish/start values
+        // ambiguous about which calendar day they meant.
+        multiDay: !!(req.body && req.body.multiDay),
         boats: {},
         course: emptyCourse(),
         selfBoatId: null
@@ -1433,7 +1450,11 @@ module.exports = function (app) {
       const tz = isFinite(tzParsed) ? tzParsed : new Date().getTimezoneOffset();
 
       const ranked = rankedBoatList(race);
-      const headers = ['Rank', 'Boat', 'MMSI', 'TCF', 'Elapsed', 'Corrected', 'Finish Time', 'Status'];
+      // A multi-day race's finish/start times can land on different
+      // calendar days, so the date is included alongside the time —
+      // otherwise just the time-of-day, matching how they're entered.
+      const fmtWhen = race.multiDay ? formatLocalDateTime : formatLocalTime;
+      const headers = ['Rank', 'Boat', 'MMSI', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status'];
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Race Control';
@@ -1464,19 +1485,21 @@ module.exports = function (app) {
       ranked.forEach((r, i) => {
         const status = r.boat.dnf ? 'DNF' : r.boat.finishTime ? 'Finished' : race.startTime ? 'Racing' : 'Not started';
         const rankLabel = r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : '';
+        const start = effectiveStartTime(race, r.boat);
         sheet.addRow([
           rankLabel,
           r.boat.name,
           r.boat.mmsi || '',
           r.boat.tcf,
+          start ? fmtWhen(start, tz) : '',
           formatDurationHms(r.elapsedMs),
           formatDurationHms(r.correctedMs),
-          r.boat.finishTime ? formatLocalTime(r.boat.finishTime, tz) : '',
+          r.boat.finishTime ? fmtWhen(r.boat.finishTime, tz) : '',
           status
         ]);
       });
 
-      const widths = [7, 24, 12, 8, 12, 12, 12, 12];
+      const widths = [7, 24, 12, 8, race.multiDay ? 17 : 12, 12, 12, race.multiDay ? 17 : 12, 12];
       widths.forEach((w, i) => {
         sheet.getColumn(i + 1).width = w;
       });
@@ -1492,7 +1515,6 @@ module.exports = function (app) {
         if (!res.headersSent) res.status(500).json({ error: 'Could not generate export' });
       }
     });
-
 
     // A standalone, self-contained backup timer: current boats/TCF/progress
     // baked in, everything else (start/stop, finishes, DNF, self-compare)
@@ -1573,6 +1595,7 @@ module.exports = function (app) {
       race.scheduledCallOff = null;
       Object.values(race.boats).forEach((b) => {
         b.finishTime = null;
+        b.startTime = null;
         b.track = [];
         b.dnf = false;
         b.dnfPosition = null;
@@ -1721,6 +1744,7 @@ module.exports = function (app) {
         mmsi: mmsi || null,
         tcf,
         finishTime: null,
+        startTime: null,
         track: [],
         dnf: false,
         dnfPosition: null
@@ -1760,6 +1784,29 @@ module.exports = function (app) {
         // caught a boat that had actually already crossed the line).
         boat.dnf = false;
         boat.dnfPosition = null;
+      }
+      saveState();
+      res.json(boat);
+    });
+
+    // Sets (or, with startTime: null, clears) one boat's own start time,
+    // overriding the race's single start time for that boat only — for a
+    // staggered/pursuit start, or correcting a boat that didn't actually
+    // start with the fleet.
+    router.put('/races/:id/boats/:boatId/startTime', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const boat = getBoat(race, req.params.boatId);
+      if (!boat) return res.status(404).json({ error: 'No such boat' });
+      const raw = req.body ? req.body.startTime : undefined;
+      if (raw === null) {
+        boat.startTime = null;
+      } else {
+        const t = Number(raw);
+        if (!isFinite(t) || t <= 0) {
+          return res.status(400).json({ error: 'startTime must be an epoch-millisecond timestamp or null' });
+        }
+        boat.startTime = t;
       }
       saveState();
       res.json(boat);

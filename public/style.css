@@ -102,6 +102,24 @@ button.confirming {
   width: 16rem;
 }
 
+.multi-day-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.start-time-input {
+  padding: 0.3rem 0.4rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
 .controls {
   margin-top: 0.75rem;
   display: flex;
