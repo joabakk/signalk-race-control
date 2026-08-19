@@ -75,6 +75,15 @@ and a live projected finishing order — during and after the race.
   ranking, same rows as the on-screen table: rank, boat, MMSI, TCF, elapsed,
   corrected, finish time, status), with the finish-time column rendered in your
   browser's own timezone rather than the server's.
+- **Download Offline Timer** — a single self-contained `.html` file, seeded with the
+  current race's boats and TCF, that runs the core of race timing (start/stop/resume/
+  reset, add/remove boats, edit TCF, record finishes, DNF, self-comparison) with no
+  server and no internet connection at all — a backup for keeping a race running if
+  this plugin's server becomes unreachable mid-event. It saves everything to that
+  browser's own local storage, so closing and reopening the same downloaded file picks
+  up right where you left off. AIS boat names/positions, VET-tall lookup, and the
+  course/chart all need the live server and aren't included; TCF is entered by hand
+  instead. Also has its own "Download results as CSV" button.
 
 ## Install
 
@@ -112,7 +121,9 @@ Then restart the SignalK server, enable "Race Control" under
 7. Click a boat's ☆ to mark it **self** and see the **vs Self** column fill in for
    every other boat.
 8. **Export to Excel** downloads the current standings as a `.xlsx` file at any time
-   — before, during, or after the race.
+   — before, during, or after the race. **Download Offline Timer** grabs a standalone
+   backup copy of the race instead — worth doing before the start if you want a safety
+   net in case the server drops out mid-race.
 9. Switch races anytime via the dropdown at the top to review an earlier race's
    results, or plan the next one. **Delete Race** (arm-then-confirm) removes one.
 

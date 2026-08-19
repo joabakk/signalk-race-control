@@ -24,6 +24,7 @@
   const newRaceBtn = document.getElementById('newRaceBtn');
   const deleteRaceBtn = document.getElementById('deleteRaceBtn');
   const exportBtn = document.getElementById('exportBtn');
+  const exportOfflineBtn = document.getElementById('exportOfflineBtn');
   const newRaceForm = document.getElementById('newRaceForm');
   const newRaceNameInput = document.getElementById('newRaceName');
   const createRaceBtn = document.getElementById('createRaceBtn');
@@ -406,6 +407,11 @@
     if (!activeRaceId) return;
     const tzOffsetMinutes = new Date().getTimezoneOffset();
     window.location.href = `${API}/races/${encodeURIComponent(activeRaceId)}/export.xlsx?tzOffsetMinutes=${tzOffsetMinutes}`;
+  }
+
+  function exportOfflineTimer() {
+    if (!activeRaceId) return;
+    window.location.href = `${API}/races/${encodeURIComponent(activeRaceId)}/export-offline.html`;
   }
 
   // Click once to arm, click again within a few seconds to confirm — an
@@ -1299,6 +1305,7 @@
     boatsTable.hidden = !raceState;
     deleteRaceBtn.hidden = !raceState;
     exportBtn.hidden = !raceState;
+    exportOfflineBtn.hidden = !raceState;
     courseSection.hidden = !raceState;
 
     if (!raceState) {
@@ -1462,6 +1469,7 @@
     if (e.key === 'Escape') closeNewRaceForm();
   });
   exportBtn.addEventListener('click', exportRace);
+  exportOfflineBtn.addEventListener('click', exportOfflineTimer);
   armConfirm(deleteRaceBtn, 'Delete Race', 'Confirm Delete?', performDeleteRace);
   startBtn.addEventListener('click', startRace);
   stopBtn.addEventListener('click', stopRace);

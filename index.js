@@ -239,6 +239,698 @@ function formatLocalDateTime(utcMs, tzOffsetMinutes) {
   );
 }
 
+// A single self-contained .html file: a trimmed, independent reimplementation
+// of the core timing UI (start/stop/resume/reset, add/remove boats, TCF,
+// finish times, DNF, self-comparison) that needs no server, no network, and
+// no AIS — for a race committee to keep running a race if this plugin's
+// server becomes unreachable mid-event. State is saved to the browser's own
+// localStorage (keyed by this race's id) so closing and reopening the same
+// downloaded file picks up where it left off. Course/chart, AIS boat
+// names/positions, estimated finish, and VET-tall import all need the live
+// server and are intentionally left out.
+function buildOfflineTimerHtml(race, defaultTcf) {
+  const seed = {
+    name: race.name,
+    startTime: race.startTime,
+    stopTime: race.stopTime,
+    selfBoatId: race.selfBoatId,
+    multiDay: !!race.multiDay,
+    defaultTcf: defaultTcf,
+    boats: Object.values(race.boats).map((b) => ({
+      id: b.id,
+      name: b.name,
+      tcf: b.tcf != null ? b.tcf : defaultTcf,
+      startTime: b.startTime || null,
+      finishTime: b.finishTime || null,
+      dnf: !!b.dnf
+    })),
+    storageKey: 'raceControlOffline_v1_' + race.id
+  };
+  // Embedded inside a <script type="application/json"> tag — race/boat names
+  // are user-entered text, so any literal "<" (the only character that could
+  // prematurely close the tag, e.g. via "</script>" in a boat name) is
+  // escaped. JSON.parse doesn't need this reversed; < is valid JSON.
+  const seedJson = JSON.stringify(seed).replace(/</g, '\\u003c');
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Race Control — Offline Timer</title>
+<style>
+:root {
+  --bg: #0f172a; --panel: #1e293b; --border: #334155; --text: #e2e8f0;
+  --muted: #94a3b8; --accent: #38bdf8; --good: #22c55e; --bad: #f87171;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); text-align: center; }
+h1 { margin: 0 0 0.4rem; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); text-transform: uppercase; }
+h2 { margin: 0 0 0.75rem; font-size: 1.3rem; }
+.offline-note { max-width: 40rem; margin: 0 auto 1rem; font-size: 0.8rem; color: var(--muted); }
+.clock { font-size: 3rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; color: var(--accent); }
+.clock.stopped { color: var(--bad); }
+.controls { margin-top: 0.75rem; display: flex; gap: 0.5rem; justify-content: center; }
+.race-start-row { margin-top: 0.6rem; display: flex; gap: 0.4rem; justify-content: center; align-items: center; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
+.race-start-row input { padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-variant-numeric: tabular-nums; }
+.race-start-row button { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+button { font-size: 0.95rem; padding: 0.5rem 1.1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--accent); color: #04202e; font-weight: 600; cursor: pointer; }
+button.secondary { background: transparent; color: var(--text); }
+button.danger { border-color: var(--bad); color: var(--bad); }
+button.confirming { background: var(--bad); color: #2a0a0a; border-color: var(--bad); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.status { min-height: 1.2em; margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+.status.error { color: var(--bad); }
+main { padding: 1rem 1.5rem 2rem; max-width: 900px; margin: 0 auto; }
+.add-boat-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.add-boat-row input[type='text'] { flex: 1; min-width: 12rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+.add-boat-row input[type='number'] { width: 6rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; min-width: 44rem; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+thead th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
+tbody td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); }
+tbody tr.finished td { color: var(--good); }
+tbody tr.dnf td { color: var(--muted); }
+.dnf-tag { color: var(--bad); font-weight: 700; font-size: 0.85rem; letter-spacing: 0.03em; }
+.tcf-input { width: 5.5rem; padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+.tcf-input::-webkit-outer-spin-button, .tcf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tcf-input[type='number'] { -moz-appearance: textfield; }
+.self-btn { background: none; border: none; padding: 0 0.3rem 0 0; font-size: 1rem; color: var(--muted); cursor: pointer; vertical-align: middle; }
+.self-btn.active { color: var(--accent); }
+.vs-self { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); }
+.vs-self.ahead { color: var(--good); }
+.vs-self.behind { color: var(--bad); }
+.vs-self .self-tag { font-size: 0.7rem; letter-spacing: 0.04em; color: var(--muted); font-style: italic; }
+.finish-cell { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.finish-time-input, .start-time-input { padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-variant-numeric: tabular-nums; }
+.finish-now-btn, .finish-clear-btn, .finish-dnf-btn, .undo-dnf-btn, .remove-boat-btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; background: transparent; color: var(--text); }
+.finish-dnf-btn { border-color: var(--bad); color: var(--bad); }
+.dnf-pos { display: block; font-size: 0.7rem; color: var(--muted); }
+.empty { color: var(--muted); text-align: center; margin-top: 2rem; }
+.footer-actions { margin-top: 1.25rem; display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Race Control — Offline Timer</h1>
+  <p class="offline-note">Standalone backup — works with no server or internet connection.
+    Everything you do here is saved in this browser only (reopen this same downloaded file
+    to continue). Boat names/positions from AIS, VET-tall handicap lookup, and the
+    course/chart aren't available offline — TCF is entered by hand.</p>
+  <h2 id="raceName"></h2>
+  <div id="clock" class="clock">00:00:00</div>
+  <div class="controls">
+    <button id="startBtn">Start Race</button>
+    <button id="stopBtn" class="secondary" hidden>Stop</button>
+    <button id="resumeBtn" class="secondary" hidden>Resume</button>
+    <button id="resetBtn" class="secondary">Reset</button>
+  </div>
+  <div class="race-start-row">
+    <label for="raceStartInput">Race start:</label>
+    <input type="time" id="raceStartInput" step="1" />
+    <button id="raceStartNowBtn" type="button" class="secondary">Now</button>
+    <button id="raceStartClearBtn" type="button" class="secondary">Clear</button>
+  </div>
+  <div id="statusLine" class="status"></div>
+</header>
+<main>
+  <div class="add-boat-row">
+    <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" />
+    <input type="number" id="addBoatTcf" step="0.001" min="0.01" title="TCF" />
+    <button id="addBoatBtn">Add Boat</button>
+  </div>
+  <div class="table-scroll">
+    <table id="boatsTable">
+      <thead>
+        <tr>
+          <th>Boat</th>
+          <th>TCF</th>
+          <th>Start time</th>
+          <th>Elapsed</th>
+          <th>Corrected</th>
+          <th>vs Self</th>
+          <th>Finish time</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="boatsBody"></tbody>
+    </table>
+  </div>
+  <p id="emptyMsg" class="empty" hidden>No boats yet. Use "Add Boat" above.</p>
+  <div class="footer-actions">
+    <button id="downloadCsvBtn" class="secondary">Download results as CSV</button>
+  </div>
+</main>
+<script id="seed-data" type="application/json">${seedJson}</script>
+<script>
+(function () {
+  var STORAGE_KEY = null;
+  var race = null;
+  try {
+    var seed = JSON.parse(document.getElementById('seed-data').textContent);
+    STORAGE_KEY = seed.storageKey;
+    var saved = localStorage.getItem(STORAGE_KEY);
+    race = saved ? JSON.parse(saved) : seed;
+    if (!saved) save();
+  } catch (e) {
+    race = { name: 'Race', startTime: null, stopTime: null, selfBoatId: null, multiDay: false, boats: [], defaultTcf: 1.0 };
+  }
+
+  function save() {
+    if (!STORAGE_KEY) return;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(race)); } catch (e) {}
+  }
+
+  function genId() {
+    return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function findBoat(id) {
+    for (var i = 0; i < race.boats.length; i++) if (race.boats[i].id === id) return race.boats[i];
+    return null;
+  }
+
+  function doStart() {
+    race.startTime = Date.now();
+    race.stopTime = null;
+    race.boats.forEach(function (b) { b.finishTime = null; b.startTime = null; b.dnf = false; });
+    save();
+  }
+  function doStop() {
+    race.stopTime = Date.now();
+    race.boats.forEach(function (b) { if (!b.finishTime && !b.dnf) b.dnf = true; });
+    save();
+  }
+  function doResume() {
+    if (!race.stopTime) return;
+    race.stopTime = null;
+    race.boats.forEach(function (b) { b.dnf = false; });
+    save();
+  }
+  function doReset() {
+    race.startTime = null;
+    race.stopTime = null;
+    race.boats.forEach(function (b) { b.finishTime = null; b.startTime = null; b.dnf = false; });
+    save();
+  }
+  function effectiveStart(boat) {
+    return boat.startTime != null ? boat.startTime : race.startTime;
+  }
+
+  var statusEl = document.getElementById('statusLine');
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg || '';
+    statusEl.classList.toggle('error', !!isError);
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function fmtDuration(ms) {
+    if (ms == null || ms < 0 || !isFinite(ms)) return '--:--:--';
+    var s = Math.floor(ms / 1000);
+    return pad(Math.floor(s / 3600)) + ':' + pad(Math.floor((s % 3600) / 60)) + ':' + pad(s % 60);
+  }
+  function fmtSigned(ms) {
+    if (ms == null || !isFinite(ms)) return '—';
+    var s = Math.floor(Math.abs(ms) / 1000);
+    return (ms < 0 ? '-' : '+') + pad(Math.floor(s / 3600)) + ':' + pad(Math.floor((s % 3600) / 60)) + ':' + pad(s % 60);
+  }
+  function raceNow() { return race.stopTime || Date.now(); }
+  function tsToTimeInputValue(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  // rollover (default true) pushes an earlier-than-reference time to the
+  // next day — correct for a finish time, wrong for a start time (a start
+  // has no "must be after" constraint; an earlier entry there just means
+  // earlier the same day). Callers editing a start time pass rollover: false.
+  function timeInputValueToTs(value, baseTs, rollover) {
+    if (!value) return null;
+    var parts = value.split(':').map(Number);
+    var h = parts[0] || 0, m = parts[1] || 0, s = parts[2] || 0;
+    var refTs = baseTs != null ? baseTs : race.startTime;
+    var base = refTs ? new Date(refTs) : new Date();
+    var d = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, s, 0);
+    var ts = d.getTime();
+    if (rollover !== false && refTs && ts < refTs) ts += 24 * 3600 * 1000;
+    return ts;
+  }
+  // For multi-day races: full date+time, no day-rollover guessing needed.
+  function tsToDateTimeInputValue(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  function dateTimeInputValueToTs(value) {
+    if (!value) return null;
+    var ts = new Date(value).getTime();
+    return isFinite(ts) ? ts : null;
+  }
+
+  // Mirrors the server's rankedBoatList (minus the AIS-based live estimate,
+  // which isn't available offline): finished boats rank by real corrected
+  // time, still-racing boats by corrected-so-far, DNF boats last. A boat
+  // with its own start time (staggered/pursuit start, or a correction) uses
+  // that instead of the race's single start time.
+  function rankedList() {
+    var now = raceNow();
+    return race.boats
+      .map(function (boat) {
+        var start = effectiveStart(boat);
+        var elapsedMs = !boat.dnf && start && start <= now ? (boat.finishTime || now) - start : null;
+        var tcf = boat.tcf != null ? boat.tcf : 1.0;
+        var correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
+        var rankMs = boat.dnf ? null : correctedMs;
+        return { boat: boat, elapsedMs: elapsedMs, correctedMs: correctedMs, rankMs: rankMs };
+      })
+      .sort(function (a, b) {
+        if (a.rankMs == null && b.rankMs == null) return a.boat.name.localeCompare(b.boat.name);
+        if (a.rankMs == null) return 1;
+        if (b.rankMs == null) return -1;
+        return a.rankMs - b.rankMs;
+      });
+  }
+
+  // With no boat marked self, falls back to comparing everyone against the
+  // current leader instead of leaving the column blank — ranked is already
+  // sorted by rank, so the leader (if any is actually ranked yet) is simply
+  // the first entry.
+  function computeVsSelf(ranked) {
+    var map = {};
+    var self = null;
+    for (var i = 0; i < ranked.length; i++) if (ranked[i].boat.id === race.selfBoatId) self = ranked[i];
+    var isLeaderFallback = false;
+    if (!self) {
+      self = ranked.length && ranked[0].rankMs != null ? ranked[0] : null;
+      isLeaderFallback = true;
+    }
+    if (!self) return map;
+    ranked.forEach(function (r) {
+      if (r.boat.id === self.boat.id) { map[r.boat.id] = { type: 'self', isLeader: isLeaderFallback }; return; }
+      if (self.boat.dnf) { map[r.boat.id] = { type: 'none' }; return; }
+      if (!self.boat.finishTime && r.boat.finishTime) {
+        var thresholdElapsedMs = r.correctedMs / (self.boat.tcf || 1);
+        map[r.boat.id] = {
+          type: 'countdown',
+          remainingMs: thresholdElapsedMs - self.elapsedMs,
+          isLeader: isLeaderFallback
+        };
+        return;
+      }
+      var selfVal = self.boat.finishTime ? self.correctedMs : self.rankMs;
+      var otherVal = r.boat.finishTime ? r.correctedMs : r.rankMs;
+      if (selfVal == null || otherVal == null) { map[r.boat.id] = { type: 'none' }; return; }
+      map[r.boat.id] = { type: 'gap', gapMs: otherVal - selfVal, isLeader: isLeaderFallback };
+    });
+    return map;
+  }
+
+  function armConfirm(button, idleLabel, confirmLabel, onConfirm) {
+    var armed = false, timer = null;
+    function disarm() {
+      armed = false;
+      clearTimeout(timer);
+      button.textContent = idleLabel;
+      button.classList.remove('confirming');
+    }
+    button.addEventListener('click', function () {
+      if (!armed) {
+        armed = true;
+        button.textContent = confirmLabel;
+        button.classList.add('confirming');
+        timer = setTimeout(disarm, 4000);
+      } else {
+        disarm();
+        onConfirm();
+      }
+    });
+  }
+
+  var clockEl = document.getElementById('clock');
+  var startBtn = document.getElementById('startBtn');
+  var stopBtn = document.getElementById('stopBtn');
+  var resumeBtn = document.getElementById('resumeBtn');
+  var resetBtn = document.getElementById('resetBtn');
+  var raceStartInput = document.getElementById('raceStartInput');
+  var raceStartNowBtn = document.getElementById('raceStartNowBtn');
+  var raceStartClearBtn = document.getElementById('raceStartClearBtn');
+  var raceNameEl = document.getElementById('raceName');
+  var boatsBody = document.getElementById('boatsBody');
+  var emptyMsg = document.getElementById('emptyMsg');
+  var addBoatName = document.getElementById('addBoatName');
+  var addBoatTcf = document.getElementById('addBoatTcf');
+  var addBoatBtn = document.getElementById('addBoatBtn');
+  var downloadCsvBtn = document.getElementById('downloadCsvBtn');
+
+  addBoatTcf.value = race.defaultTcf || 1.0;
+  raceStartInput.type = race.multiDay ? 'datetime-local' : 'time';
+  raceNameEl.textContent = race.name || 'Race';
+  document.title = (race.name || 'Race') + ' — Offline Timer';
+
+  // Sets (or, with null, clears) the race's own start time directly — a
+  // correction tool, distinct from Start Race: it never touches boats'
+  // finish times, DNF, or their own start-time overrides. Useful for
+  // backdating the start after opening this file later than the actual gun
+  // (e.g. because the server went down), or fixing a start clicked late.
+  function setRaceStartTime(ts) {
+    race.startTime = ts;
+    save();
+    render();
+  }
+  raceStartInput.addEventListener('change', function () {
+    if (!raceStartInput.value) {
+      setRaceStartTime(null);
+      return;
+    }
+    var ts = race.multiDay
+      ? dateTimeInputValueToTs(raceStartInput.value)
+      : timeInputValueToTs(raceStartInput.value, race.startTime || Date.now(), false);
+    setRaceStartTime(ts);
+  });
+  raceStartNowBtn.addEventListener('click', function () { setRaceStartTime(Date.now()); });
+  raceStartClearBtn.addEventListener('click', function () { setRaceStartTime(null); });
+
+  var rows = {};
+  function buildRow(boatId) {
+    var tr = document.createElement('tr');
+    var selfBtn = document.createElement('button');
+    selfBtn.type = 'button';
+    selfBtn.className = 'self-btn';
+    selfBtn.title = 'Mark as self, to compare other boats against';
+    selfBtn.textContent = '☆';
+    selfBtn.addEventListener('click', function () {
+      race.selfBoatId = race.selfBoatId === boatId ? null : boatId;
+      save();
+      render();
+    });
+    var nameSpan = document.createElement('span');
+    var tdName = document.createElement('td');
+    tdName.append(selfBtn, nameSpan);
+
+    var tcfInput = document.createElement('input');
+    tcfInput.type = 'number';
+    tcfInput.step = '0.001';
+    tcfInput.min = '0.01';
+    tcfInput.className = 'tcf-input';
+    tcfInput.addEventListener('change', function () {
+      var val = parseFloat(tcfInput.value);
+      if (isFinite(val) && val > 0) {
+        var boat = findBoat(boatId);
+        if (boat) { boat.tcf = val; save(); render(); }
+      }
+    });
+    tcfInput.addEventListener('wheel', function (e) { e.preventDefault(); }, { passive: false });
+    tcfInput.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+    });
+    var tdTcf = document.createElement('td');
+    tdTcf.appendChild(tcfInput);
+
+    var startTimeInput = document.createElement('input');
+    startTimeInput.type = race.multiDay ? 'datetime-local' : 'time';
+    startTimeInput.step = '1';
+    startTimeInput.className = 'start-time-input';
+    startTimeInput.addEventListener('change', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      if (!startTimeInput.value) {
+        boat.startTime = null;
+      } else {
+        boat.startTime = race.multiDay
+          ? dateTimeInputValueToTs(startTimeInput.value)
+          : timeInputValueToTs(startTimeInput.value, race.startTime || Date.now(), false);
+      }
+      save();
+      render();
+    });
+    var startNowBtn = document.createElement('button');
+    startNowBtn.type = 'button';
+    startNowBtn.className = 'finish-now-btn';
+    startNowBtn.textContent = 'Now';
+    startNowBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.startTime = Date.now();
+      save();
+      render();
+    });
+    var startClearBtn = document.createElement('button');
+    startClearBtn.type = 'button';
+    startClearBtn.className = 'finish-clear-btn';
+    startClearBtn.textContent = 'Clear';
+    startClearBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.startTime = null;
+      save();
+      render();
+    });
+    var startWrap = document.createElement('div');
+    startWrap.className = 'finish-cell';
+    startWrap.append(startTimeInput, startNowBtn, startClearBtn);
+    var tdStart = document.createElement('td');
+    tdStart.appendChild(startWrap);
+
+    var tdElapsed = document.createElement('td');
+    var tdCorrected = document.createElement('td');
+    var tdVsSelf = document.createElement('td');
+    tdVsSelf.className = 'vs-self';
+
+    var finishTimeInput = document.createElement('input');
+    finishTimeInput.type = race.multiDay ? 'datetime-local' : 'time';
+    finishTimeInput.step = '1';
+    finishTimeInput.className = 'finish-time-input';
+    finishTimeInput.addEventListener('change', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      if (!finishTimeInput.value) {
+        boat.finishTime = null;
+      } else {
+        boat.finishTime = race.multiDay
+          ? dateTimeInputValueToTs(finishTimeInput.value)
+          : timeInputValueToTs(finishTimeInput.value);
+      }
+      save();
+      render();
+    });
+    var finishNowBtn = document.createElement('button');
+    finishNowBtn.type = 'button';
+    finishNowBtn.className = 'finish-now-btn';
+    finishNowBtn.textContent = 'Now';
+    finishNowBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.finishTime = Date.now();
+      save();
+      render();
+    });
+    var finishClearBtn = document.createElement('button');
+    finishClearBtn.type = 'button';
+    finishClearBtn.className = 'finish-clear-btn';
+    finishClearBtn.textContent = 'Clear';
+    finishClearBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.finishTime = null;
+      save();
+      render();
+    });
+    var finishDnfBtn = document.createElement('button');
+    finishDnfBtn.type = 'button';
+    finishDnfBtn.className = 'finish-dnf-btn';
+    finishDnfBtn.textContent = 'DNF';
+    finishDnfBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.dnf = true;
+      save();
+      render();
+    });
+    var finishNormalWrap = document.createElement('div');
+    finishNormalWrap.className = 'finish-cell';
+    finishNormalWrap.append(finishTimeInput, finishNowBtn, finishClearBtn, finishDnfBtn);
+
+    var dnfTag = document.createElement('span');
+    dnfTag.className = 'dnf-tag';
+    dnfTag.textContent = 'DNF';
+    var undoDnfBtn = document.createElement('button');
+    undoDnfBtn.type = 'button';
+    undoDnfBtn.className = 'undo-dnf-btn';
+    undoDnfBtn.textContent = 'Undo DNF';
+    undoDnfBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.dnf = false;
+      save();
+      render();
+    });
+    var dnfWrap = document.createElement('div');
+    dnfWrap.className = 'finish-cell';
+    dnfWrap.append(dnfTag, undoDnfBtn);
+
+    var tdFinish = document.createElement('td');
+    tdFinish.append(finishNormalWrap, dnfWrap);
+
+    var removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'secondary danger remove-boat-btn';
+    removeBtn.textContent = 'Remove';
+    armConfirm(removeBtn, 'Remove', 'Confirm?', function () {
+      // Don't delete rows[boatId] here — render()'s own seenIds cleanup
+      // needs that entry to still be present so it can remove(). the <tr>
+      // from the DOM, not just forget about it.
+      race.boats = race.boats.filter(function (b) { return b.id !== boatId; });
+      save();
+      render();
+    });
+    var tdRemove = document.createElement('td');
+    tdRemove.appendChild(removeBtn);
+
+    tr.append(tdName, tdTcf, tdStart, tdElapsed, tdCorrected, tdVsSelf, tdFinish, tdRemove);
+    return {
+      tr: tr, selfBtn: selfBtn, nameSpan: nameSpan, tcfInput: tcfInput,
+      startTimeInput: startTimeInput, startNowBtn: startNowBtn, startClearBtn: startClearBtn,
+      tdElapsed: tdElapsed, tdCorrected: tdCorrected, tdVsSelf: tdVsSelf,
+      finishNormalWrap: finishNormalWrap, finishTimeInput: finishTimeInput, dnfWrap: dnfWrap
+    };
+  }
+
+  function render() {
+    if (race.startTime) {
+      clockEl.textContent = fmtDuration(raceNow() - race.startTime);
+      clockEl.classList.toggle('stopped', !!race.stopTime);
+    } else {
+      clockEl.textContent = '00:00:00';
+      clockEl.classList.remove('stopped');
+    }
+    startBtn.disabled = !!race.startTime;
+    startBtn.textContent = race.startTime ? 'Race Started' : 'Start Race';
+    stopBtn.hidden = !race.startTime || !!race.stopTime;
+    resumeBtn.hidden = !race.stopTime;
+    if (document.activeElement !== raceStartInput) {
+      raceStartInput.value = race.multiDay ? tsToDateTimeInputValue(race.startTime) : tsToTimeInputValue(race.startTime);
+    }
+
+    emptyMsg.hidden = race.boats.length > 0;
+    var ranked = rankedList();
+    var vsSelfMap = computeVsSelf(ranked);
+    var seenIds = {};
+    ranked.forEach(function (r) {
+      var b = r.boat;
+      seenIds[b.id] = true;
+      var row = rows[b.id];
+      if (!row) { row = buildRow(b.id); rows[b.id] = row; }
+      row.tr.classList.toggle('finished', !!b.finishTime);
+      row.tr.classList.toggle('dnf', !!b.dnf);
+      row.nameSpan.textContent = b.name;
+      var isSelf = b.id === race.selfBoatId;
+      row.selfBtn.textContent = isSelf ? '★' : '☆';
+      row.selfBtn.classList.toggle('active', isSelf);
+      if (document.activeElement !== row.tcfInput) row.tcfInput.value = b.tcf;
+      if (document.activeElement !== row.startTimeInput) {
+        row.startTimeInput.value = race.multiDay ? tsToDateTimeInputValue(b.startTime) : tsToTimeInputValue(b.startTime);
+      }
+      var canStart = !!race.startTime;
+      row.startTimeInput.disabled = !canStart;
+      row.startNowBtn.disabled = !canStart;
+      row.startClearBtn.disabled = !canStart || !b.startTime;
+      row.tdElapsed.textContent = fmtDuration(r.elapsedMs);
+      row.tdCorrected.textContent = fmtDuration(r.correctedMs);
+      var vs = vsSelfMap[b.id];
+      row.tdVsSelf.classList.remove('ahead', 'behind');
+      if (!vs || vs.type === 'none') {
+        row.tdVsSelf.textContent = '—';
+      } else if (vs.type === 'self') {
+        row.tdVsSelf.innerHTML = vs.isLeader ? '<span class="self-tag">LEADER</span>' : '<span class="self-tag">SELF</span>';
+      } else if (vs.type === 'countdown') {
+        row.tdVsSelf.textContent = fmtSigned(vs.remainingMs);
+        row.tdVsSelf.classList.add(vs.remainingMs < 0 ? 'behind' : 'ahead');
+      } else {
+        row.tdVsSelf.textContent = fmtSigned(vs.gapMs);
+        row.tdVsSelf.classList.add(vs.gapMs < 0 ? 'ahead' : 'behind');
+      }
+      row.finishNormalWrap.hidden = !!b.dnf;
+      row.dnfWrap.hidden = !b.dnf;
+      if (document.activeElement !== row.finishTimeInput) {
+        row.finishTimeInput.value = race.multiDay ? tsToDateTimeInputValue(b.finishTime) : tsToTimeInputValue(b.finishTime);
+      }
+    });
+    Object.keys(rows).forEach(function (id) {
+      if (!seenIds[id]) { if (rows[id].tr.parentNode) rows[id].tr.remove(); delete rows[id]; }
+    });
+    // Reorder to match ranking, skipping while the row (or something inside
+    // it) has focus so an in-progress edit isn't disrupted mid-keystroke.
+    ranked.forEach(function (r, i) {
+      var row = rows[r.boat.id];
+      if (row.tr.contains(document.activeElement)) return;
+      var atIndex = boatsBody.children[i];
+      if (atIndex !== row.tr) boatsBody.insertBefore(row.tr, atIndex || null);
+    });
+  }
+
+  startBtn.addEventListener('click', function () { doStart(); render(); });
+  stopBtn.addEventListener('click', function () { doStop(); render(); });
+  resumeBtn.addEventListener('click', function () { doResume(); render(); });
+  armConfirm(resetBtn, 'Reset', 'Confirm Reset?', function () { doReset(); render(); });
+
+  function addBoat() {
+    var name = addBoatName.value.trim();
+    if (!name) { setStatus('Enter a boat name to add.', true); addBoatName.focus(); return; }
+    var tcf = parseFloat(addBoatTcf.value);
+    if (!isFinite(tcf) || tcf <= 0) tcf = race.defaultTcf || 1.0;
+    race.boats.push({ id: genId(), name: name, tcf: tcf, startTime: null, finishTime: null, dnf: false });
+    save();
+    addBoatName.value = '';
+    addBoatName.focus();
+    setStatus('');
+    render();
+  }
+  addBoatBtn.addEventListener('click', addBoat);
+  addBoatName.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addBoat(); }
+  });
+
+  downloadCsvBtn.addEventListener('click', function () {
+    var fmtWhen = race.multiDay ? tsToDateTimeInputValue : tsToTimeInputValue;
+    var rows = [['Rank', 'Boat', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status']];
+    rankedList().forEach(function (r, i) {
+      var status = r.boat.dnf ? 'DNF' : r.boat.finishTime ? 'Finished' : race.startTime ? 'Racing' : 'Not started';
+      var rankLabel = r.boat.dnf ? 'DNF' : r.rankMs != null ? String(i + 1) : '';
+      var start = effectiveStart(r.boat);
+      rows.push([
+        rankLabel, r.boat.name, r.boat.tcf, start ? fmtWhen(start) : '', fmtDuration(r.elapsedMs), fmtDuration(r.correctedMs),
+        r.boat.finishTime ? fmtWhen(r.boat.finishTime) : '', status
+      ]);
+    });
+    var csv = rows.map(function (row) {
+      return row.map(function (cell) {
+        var s = String(cell == null ? '' : cell);
+        return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\\r\\n');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (race.name || 'race').replace(/[^a-z0-9\\-_]+/gi, '_').slice(0, 60) + '-offline-results.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
+
+  render();
+  setInterval(render, 1000);
+})();
+</script>
+</body>
+</html>
+`;
+}
+
 module.exports = function (app) {
   const plugin = {};
 
@@ -799,6 +1491,22 @@ module.exports = function (app) {
         app.error('race-control: failed to generate xlsx export: ' + e.message);
         if (!res.headersSent) res.status(500).json({ error: 'Could not generate export' });
       }
+    });
+
+
+    // A standalone, self-contained backup timer: current boats/TCF/progress
+    // baked in, everything else (start/stop, finishes, DNF, self-compare)
+    // runs entirely client-side with no server — see buildOfflineTimerHtml.
+    router.get('/races/:id/export-offline.html', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      ensureRaceShape(race);
+      const defaultTcf = (plugin.options && plugin.options.defaultTcf) || 1.0;
+      const html = buildOfflineTimerHtml(race, defaultTcf);
+      const safeName = (race.name || 'race').replace(/[^a-z0-9\-_]+/gi, '_').slice(0, 60) || 'race';
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}-offline-timer.html"`);
+      res.send(html);
     });
 
     router.post('/races/:id/select', (req, res) => {
