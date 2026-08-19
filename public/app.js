@@ -1099,13 +1099,22 @@
   //  - "gap": both values are pinned (self finished) or both still moving
   //    (neither finished) — just the current corrected-time gap, positive
   //    when self is ahead.
+  // With no boat marked self, falls back to comparing everyone against the
+  // current leader instead of leaving the column blank — boats is already
+  // sorted by rank, so the leader (if any is actually ranked yet) is simply
+  // the first entry.
   function computeVsSelf(boats, selfBoatId) {
     const map = new Map();
-    const self = boats.find((b) => b.boatId === selfBoatId);
+    let self = boats.find((b) => b.boatId === selfBoatId);
+    let isLeaderFallback = false;
+    if (!self) {
+      self = boats.length && boats[0].rankMs != null ? boats[0] : null;
+      isLeaderFallback = true;
+    }
     if (!self) return map;
     boats.forEach((b) => {
-      if (b.boatId === selfBoatId) {
-        map.set(b.boatId, { type: 'self' });
+      if (b.boatId === self.boatId) {
+        map.set(b.boatId, { type: 'self', isLeader: isLeaderFallback });
         return;
       }
       if (self.dnf) {
@@ -1115,7 +1124,11 @@
       }
       if (!self.finishTime && b.finishTime) {
         const thresholdElapsedMs = b.correctedMs / (self.tcf || 1);
-        map.set(b.boatId, { type: 'countdown', remainingMs: thresholdElapsedMs - self.elapsedMs });
+        map.set(b.boatId, {
+          type: 'countdown',
+          remainingMs: thresholdElapsedMs - self.elapsedMs,
+          isLeader: isLeaderFallback
+        });
         return;
       }
       const selfVal = self.finishTime ? self.correctedMs : self.rankMs;
@@ -1124,7 +1137,7 @@
         map.set(b.boatId, { type: 'none' });
         return;
       }
-      map.set(b.boatId, { type: 'gap', gapMs: otherVal - selfVal });
+      map.set(b.boatId, { type: 'gap', gapMs: otherVal - selfVal, isLeader: isLeaderFallback });
     });
     return map;
   }
@@ -1526,24 +1539,26 @@
 
       const vs = vsSelfMap.get(b.boatId);
       if (!vs || vs.type === 'none') {
-        row.tdVsSelf.textContent = raceState.selfBoatId ? '—' : '';
+        row.tdVsSelf.textContent = vs ? '—' : '';
         row.tdVsSelf.className = 'vs-self';
         row.tdVsSelf.title = '';
       } else if (vs.type === 'self') {
-        row.tdVsSelf.innerHTML = '<span class="self-tag">SELF</span>';
+        row.tdVsSelf.innerHTML = vs.isLeader ? '<span class="self-tag">LEADER</span>' : '<span class="self-tag">SELF</span>';
         row.tdVsSelf.className = 'vs-self';
-        row.tdVsSelf.title = '';
+        row.tdVsSelf.title = vs.isLeader ? 'Current leader — click a boat\'s star to compare against it instead' : '';
       } else if (vs.type === 'countdown') {
         const behind = vs.remainingMs < 0;
+        const who = vs.isLeader ? 'The leader' : 'Self';
         row.tdVsSelf.textContent = (behind ? '-' : '') + fmtDuration(Math.abs(vs.remainingMs));
         row.tdVsSelf.className = 'vs-self ' + (behind ? 'behind' : 'ahead');
         row.tdVsSelf.title = behind
-          ? 'Self would already finish behind this boat on corrected time'
-          : 'Time self has left to finish and still beat this boat on corrected time';
+          ? `${who} would already finish behind this boat on corrected time`
+          : `Time ${who.toLowerCase()} has left to finish and still beat this boat on corrected time`;
       } else {
+        const who = vs.isLeader ? 'leader' : 'self';
         row.tdVsSelf.textContent = formatSignedDuration(vs.gapMs);
         row.tdVsSelf.className = 'vs-self ' + (vs.gapMs >= 0 ? 'ahead' : 'behind');
-        row.tdVsSelf.title = 'Corrected-time gap to self (positive = self ahead)';
+        row.tdVsSelf.title = `Corrected-time gap to the ${who} (positive = ${who} ahead)`;
       }
 
       row.finishNormalWrap.hidden = b.dnf;

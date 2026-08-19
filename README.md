@@ -81,7 +81,8 @@ and a live projected finishing order — during and after the race.
   countdown to the moment self would tie them on corrected time if that boat has
   already finished (going negative, in red, once self can no longer catch up even by
   finishing instantly), or the current corrected-time gap if both are still racing or
-  both have finished.
+  both have finished. With no boat marked self, the column instead compares everyone
+  against the current **leader** (tagged accordingly), so it's never just blank.
 - **Export to Excel** — a genuine `.xlsx` snapshot of the current standings (same
   ranking, same rows as the on-screen table: rank, boat, MMSI, TCF, start time,
   elapsed, corrected, finish time, status), with the time columns rendered in your
@@ -91,7 +92,10 @@ and a live projected finishing order — during and after the race.
   current race's boats, TCF, and multi-day setting, that runs the core of race timing
   (start/stop/resume/reset, add/remove boats, edit TCF, individual start times,
   record finishes, DNF, self-comparison) with no server and no internet connection at
-  all — a backup for keeping a race running if
+  all — including its own editable **Race start** field (Now/Clear, right under the
+  Start/Stop/Resume/Reset buttons) for backdating or correcting the race's start time
+  directly, without needing to click Start Race and lose already-recorded progress —
+  a backup for keeping a race running if
   this plugin's server becomes unreachable mid-event. It saves everything to that
   browser's own local storage, so closing and reopening the same downloaded file picks
   up right where you left off. AIS boat names/positions, VET-tall lookup, and the
