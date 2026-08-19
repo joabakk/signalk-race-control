@@ -135,9 +135,12 @@ Then restart the SignalK server, enable "Race Control" under
    order — reorder with ↑/↓), and finish line, then **Save Course**.
 4. Either click **Start Race** now, or set a date/time and click **Schedule Start** —
    the race starts itself automatically at that moment (even across a server restart).
-   If a particular boat actually started at a different moment (a staggered/pursuit
-   start, or a correction), set its own time in the **Start time** column instead of
-   leaving it to follow the race's start.
+   Clicked it a little late? Fix the recorded moment directly in the **Race start**
+   field next to the clock (Now/Clear) — unlike Reset, it never touches any boat's
+   finish time, DNF, or individual start override. If a particular boat actually
+   started at a different moment (a staggered/pursuit start, or a correction), set
+   its own time in the **Start time** column instead of leaving it to follow the
+   race's start.
 5. As boats finish, click **Now** to stamp the current time, or type the exact time
    (plus date, for a multi-day race) into the finish-time field. **Clear** undoes a
    finish.

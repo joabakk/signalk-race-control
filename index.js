@@ -274,7 +274,11 @@ function buildOfflineTimerHtml(race, defaultTcf) {
       finishTime: b.finishTime || null,
       dnf: !!b.dnf
     })),
-    storageKey: 'raceControlOffline_v1_' + race.id
+    storageKey: 'raceControlOffline_v1_' + race.id,
+    // Lets a re-download know whether it's actually newer than whatever
+    // this browser already has saved locally for the race — see the load
+    // logic below.
+    exportedAt: Date.now()
   };
   // Embedded inside a <script type="application/json"> tag — race/boat names
   // are user-entered text, so any literal "<" (the only character that could
@@ -401,9 +405,18 @@ tbody tr.dnf td { color: var(--muted); }
   try {
     var seed = JSON.parse(document.getElementById('seed-data').textContent);
     STORAGE_KEY = seed.storageKey;
-    var saved = localStorage.getItem(STORAGE_KEY);
-    race = saved ? JSON.parse(saved) : seed;
-    if (!saved) save();
+    var rawSaved = localStorage.getItem(STORAGE_KEY);
+    var saved = rawSaved ? JSON.parse(rawSaved) : null;
+    // A saved local copy only wins if it's at least as fresh as this
+    // download's own seed — otherwise re-downloading an updated snapshot
+    // after managing the race further elsewhere would silently keep
+    // showing the older, already-saved copy instead.
+    if (saved && (saved.exportedAt || 0) >= seed.exportedAt) {
+      race = saved;
+    } else {
+      race = seed;
+      save();
+    }
   } catch (e) {
     race = { name: 'Race', startTime: null, stopTime: null, selfBoatId: null, multiDay: false, boats: [], defaultTcf: 1.0 };
   }
@@ -793,6 +806,7 @@ tbody tr.dnf td { color: var(--muted); }
       // needs that entry to still be present so it can remove(). the <tr>
       // from the DOM, not just forget about it.
       race.boats = race.boats.filter(function (b) { return b.id !== boatId; });
+      if (race.selfBoatId === boatId) race.selfBoatId = null;
       save();
       render();
     });
@@ -1280,7 +1294,6 @@ module.exports = function (app) {
     race.startTime = atTime;
     race.scheduledStart = null;
     race.stopTime = null;
-    race.scheduledCallOff = null;
     Object.values(race.boats).forEach((b) => {
       b.finishTime = null;
       b.startTime = null;
@@ -1289,6 +1302,10 @@ module.exports = function (app) {
       b.dnfPosition = null;
     });
     saveState();
+    // A call-off scheduled before the race started couldn't be armed yet
+    // (armCallOffSchedule requires race.startTime) — arm it now instead of
+    // discarding it.
+    armCallOffSchedule(race);
   }
 
   // Re-arms (or clears) the timer that auto-starts a race at its
@@ -1556,6 +1573,29 @@ module.exports = function (app) {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       doStart(race, Date.now());
+      res.json(raceWithEstimates(race));
+    });
+
+    // Sets (or, with startTime: null, clears) the race's own start time
+    // directly — a correction tool, distinct from Start/Schedule Start: it
+    // never touches boats' finish times, DNF, or their own start-time
+    // overrides. For backdating a late "Start Race" click, or fixing the
+    // recorded start without losing everything else already entered.
+    router.put('/races/:id/startTime', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const raw = req.body ? req.body.startTime : undefined;
+      if (raw === null) {
+        race.startTime = null;
+      } else {
+        const t = Number(raw);
+        if (!isFinite(t) || t <= 0) {
+          return res.status(400).json({ error: 'startTime must be an epoch-millisecond timestamp or null' });
+        }
+        race.startTime = t;
+      }
+      saveState();
+      armCallOffSchedule(race);
       res.json(raceWithEstimates(race));
     });
 

@@ -36,6 +36,9 @@
   const stopBtn = document.getElementById('stopBtn');
   const resumeBtn = document.getElementById('resumeBtn');
   const resetBtn = document.getElementById('resetBtn');
+  const raceStartInput = document.getElementById('raceStartInput');
+  const raceStartNowBtn = document.getElementById('raceStartNowBtn');
+  const raceStartClearBtn = document.getElementById('raceStartClearBtn');
   const scheduleInput = document.getElementById('scheduleInput');
   const scheduleBtn = document.getElementById('scheduleBtn');
   const cancelScheduleBtn = document.getElementById('cancelScheduleBtn');
@@ -493,6 +496,25 @@
     if (!activeRaceId) return;
     try {
       raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/reset`, { method: 'POST' });
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  // Sets (or, with null, clears) the race's own start time directly — a
+  // correction tool, distinct from Start Race: it never touches boats'
+  // finish times, DNF, or their own start-time overrides. For backdating a
+  // late "Start Race" click, or fixing the recorded start without losing
+  // anything else already entered.
+  async function setRaceStartTime(ts) {
+    if (!activeRaceId) return;
+    try {
+      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/startTime`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startTime: ts })
+      });
       render();
     } catch (e) {
       setStatus(e.message, true);
@@ -1464,6 +1486,13 @@
     stopBtn.hidden = !raceState.startTime || !!raceState.stopTime;
     resumeBtn.hidden = !raceState.stopTime;
 
+    raceStartInput.type = raceState.multiDay ? 'datetime-local' : 'time';
+    if (document.activeElement !== raceStartInput) {
+      raceStartInput.value = raceState.multiDay
+        ? tsToDateTimeInputValue(raceState.startTime)
+        : tsToTimeInputValue(raceState.startTime);
+    }
+
     scheduleInput.disabled = !!raceState.startTime;
     scheduleBtn.disabled = !!raceState.startTime;
     cancelScheduleBtn.hidden = !raceState.scheduledStart || !!raceState.startTime;
@@ -1605,6 +1634,19 @@
   stopBtn.addEventListener('click', stopRace);
   resumeBtn.addEventListener('click', resumeRace);
   armConfirm(resetBtn, 'Reset', 'Confirm Reset?', performResetRace);
+  raceStartInput.addEventListener('change', () => {
+    if (!raceStartInput.value) {
+      setRaceStartTime(null);
+      return;
+    }
+    const ts =
+      raceState && raceState.multiDay
+        ? dateTimeInputValueToTs(raceStartInput.value)
+        : timeInputValueToTs(raceStartInput.value, (raceState && raceState.startTime) || Date.now(), false);
+    setRaceStartTime(ts);
+  });
+  raceStartNowBtn.addEventListener('click', () => setRaceStartTime(Date.now()));
+  raceStartClearBtn.addEventListener('click', () => setRaceStartTime(null));
   scheduleBtn.addEventListener('click', scheduleRace);
   cancelScheduleBtn.addEventListener('click', cancelSchedule);
   scheduleCallOffBtn.addEventListener('click', scheduleCallOff);

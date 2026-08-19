@@ -127,13 +127,29 @@ button.confirming {
   justify-content: center;
 }
 
-.schedule-row {
+.schedule-row,
+.race-start-row {
   margin-top: 0.6rem;
   display: flex;
   gap: 0.5rem;
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.race-start-row {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.race-start-row input {
+  padding: 0.4rem 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .schedule-row input[type='datetime-local'] {
