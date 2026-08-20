@@ -53,6 +53,23 @@ and a live projected finishing order — during and after the race.
   from a live AIS/self vessel with a matching name), it's remembered in a small
   cross-race registry: add a boat with the same name in a later race and its MMSI
   fills in on its own.
+- **Import a whole fleet from Manage2Sail** — off by default (`raceImportEnabled` in
+  the plugin's settings, alongside `vetEnabled`); once turned on, an **Import boats
+  from Manage2Sail** section lets you paste a Manage2Sail event URL, pick one or more
+  of its classes, and add every entry in them as a boat in the current race. Since a
+  class's published handicap number isn't always a directly-usable Time-on-Time
+  factor — Yardstick numbers, for instance, run the opposite direction (lower number
+  = faster boat) and need `TCF = 100 / number` (or `1000 /` for the RYA scale) rather
+  than being used as-is — the plugin converts it automatically once it recognizes the
+  system. If a class's numbers don't clearly match a known system's scale, you're
+  asked to pick which one applies (e.g. Yardstick vs. Portsmouth Yardstick) before
+  anything is imported for it; anything else unrecognized (ORC, IRC, ...) is used
+  as-is, same as before. Re-importing updates TCF on boats it already added (matched
+  by name) instead of duplicating them. Not every entry has a named boat — where
+  Manage2Sail has no boat name, the sail number is used as the identifier instead of
+  falling back to the skipper's name, and every imported boat's sail number is also
+  set in its own **Sail #** column (editable directly, like MMSI) whether or not it
+  ended up as the name.
 - **Editable finish times** — click **Now** to record a finish as it happens, type a
   specific `HH:MM:SS` into the finish-time field to correct a mistimed click, or
   **Clear** to undo. Handles races that cross midnight.
@@ -88,10 +105,10 @@ and a live projected finishing order — during and after the race.
   both have finished. With no boat marked self, the column instead compares everyone
   against the current **leader** (tagged accordingly), so it's never just blank.
 - **Export to Excel** — a genuine `.xlsx` snapshot of the current standings (same
-  ranking, same rows as the on-screen table: rank, boat, MMSI, TCF, start time,
-  elapsed, corrected, finish time, status), with the time columns rendered in your
-  browser's own timezone rather than the server's (and with the date included, for a
-  multi-day race).
+  ranking, same rows as the on-screen table: rank, boat, sail number, MMSI, TCF,
+  start time, elapsed, corrected, finish time, status), with the time columns
+  rendered in your browser's own timezone rather than the server's (and with the
+  date included, for a multi-day race).
 - **Download Offline Timer** — a single self-contained `.html` file, seeded with the
   current race's boats, TCF, and multi-day setting, that runs the core of race timing
   (start/stop/resume/reset, add/remove boats, edit TCF, individual start times,

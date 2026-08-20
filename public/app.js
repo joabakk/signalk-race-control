@@ -13,6 +13,11 @@
   let handicapBoats = [];
   let handicapVersion = 0; // bumped each successful VET-register load
   let vetEnabled = false; // plugin config setting (Server -> Plugin Config), read-only here; off by default
+  let raceImportEnabled = false; // plugin config setting, same pattern as vetEnabled
+  let importEventId = null; // Manage2Sail event id from the last successful "Find Classes" lookup
+  let importClasses = []; // [{id, name}] from that same lookup
+  let importSystemOverrides = {}; // classId -> handicap system key, from the disambiguation picker
+  let importHandicapSystems = null; // [{key, label}], fetched lazily on first ambiguity
   let startLineRefs = null; // [pointRefs, pointRefs] or null
   let finishLineRefs = null;
   let markRefs = []; // [pointRefs, ...]
@@ -72,6 +77,15 @@
   const replaySlider = document.getElementById('replaySlider');
   const replayTimeLabel = document.getElementById('replayTimeLabel');
   const replayLiveBtn = document.getElementById('replayLiveBtn');
+  const raceImportSection = document.getElementById('raceImportSection');
+  const raceImportToggleBtn = document.getElementById('raceImportToggleBtn');
+  const raceImportBody = document.getElementById('raceImportBody');
+  const importEventUrl = document.getElementById('importEventUrl');
+  const importFindClassesBtn = document.getElementById('importFindClassesBtn');
+  const importClassesList = document.getElementById('importClassesList');
+  const importSystemChoices = document.getElementById('importSystemChoices');
+  const importBoatsBtn = document.getElementById('importBoatsBtn');
+  const importStatusText = document.getElementById('importStatusText');
 
   function unwrapValue(x) {
     if (x && typeof x === 'object' && 'value' in x) return x.value;
@@ -336,6 +350,17 @@
     // column disappear entirely.
     vetStatusLine.hidden = !vetEnabled;
     vetAlternativesTh.hidden = !vetEnabled;
+  }
+
+  // Same pattern as loadVetEnabled — when disabled, the whole import
+  // section is removed rather than shown disabled.
+  async function loadRaceImportEnabled() {
+    try {
+      const data = await fetchJSON(`${API}/race-import-enabled`);
+      raceImportEnabled = data.enabled === true;
+    } catch (e) {
+      raceImportEnabled = false;
+    }
   }
 
   async function loadHandicapRegister(force) {
@@ -750,6 +775,23 @@
     }
   }
 
+  async function setSailNumber(boatId, sailNumber) {
+    if (!activeRaceId) return;
+    try {
+      const boat = await fetchJSON(
+        `${API}/races/${encodeURIComponent(activeRaceId)}/boats/${encodeURIComponent(boatId)}/sailNumber`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sailNumber })
+        }
+      );
+      raceState.boats[boatId] = boat;
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
   async function setTcf(boatId, tcf) {
     if (!activeRaceId) return;
     try {
@@ -952,6 +994,143 @@
     }
   }
 
+  // ---- Manage2Sail import ----------------------------------------------
+
+  function setImportStatus(msg, isError) {
+    importStatusText.textContent = msg || '';
+    importStatusText.classList.toggle('error', !!isError);
+  }
+
+  async function findImportClasses() {
+    const url = importEventUrl.value.trim();
+    if (!url) {
+      setImportStatus('Paste a Manage2Sail event URL first.', true);
+      return;
+    }
+    importBoatsBtn.hidden = true;
+    importClassesList.innerHTML = '';
+    importSystemChoices.innerHTML = '';
+    importSystemOverrides = {};
+    importEventId = null;
+    importClasses = [];
+    setImportStatus('Looking up classes…');
+    try {
+      const data = await fetchJSON(`${API}/import/manage2sail/classes?eventUrl=${encodeURIComponent(url)}`);
+      importEventId = data.eventId;
+      importClasses = data.classes || [];
+      if (!importClasses.length) {
+        setImportStatus('No classes found on that event.', true);
+        return;
+      }
+      importClassesList.innerHTML = '';
+      importClasses.forEach((c) => {
+        const label = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = c.id;
+        label.append(cb, document.createTextNode(c.name));
+        importClassesList.appendChild(label);
+      });
+      importBoatsBtn.hidden = false;
+      setImportStatus(`Found ${importClasses.length} class${importClasses.length === 1 ? '' : 'es'} — pick which to import.`);
+    } catch (e) {
+      setImportStatus(e.message, true);
+    }
+  }
+
+  async function loadImportHandicapSystems() {
+    if (importHandicapSystems) return importHandicapSystems;
+    try {
+      const data = await fetchJSON(`${API}/import/manage2sail/handicap-systems`);
+      importHandicapSystems = data.systems || [];
+    } catch (e) {
+      importHandicapSystems = [];
+    }
+    return importHandicapSystems;
+  }
+
+  function importClassName(classId) {
+    const c = importClasses.find((cl) => cl.id === classId);
+    return c ? c.name : classId;
+  }
+
+  function importSystemLabel(key) {
+    const s = (importHandicapSystems || []).find((sys) => sys.key === key);
+    return s ? s.label : key;
+  }
+
+  // A class ends up here only when its handicap system couldn't be resolved
+  // automatically (e.g. "YS" whose values don't clearly match either the
+  // German or RYA Yardstick scale) — one picker per such class, defaulting
+  // to its first candidate so a re-click of Import works even if the user
+  // doesn't touch the dropdown, but they should actually check it's right.
+  async function renderSystemChoices(needsSystemChoice) {
+    importSystemChoices.innerHTML = '';
+    if (!needsSystemChoice.length) return;
+    await loadImportHandicapSystems();
+    needsSystemChoice.forEach((item) => {
+      if (importSystemOverrides[item.classId] == null) {
+        importSystemOverrides[item.classId] = item.candidates[0];
+      }
+      const row = document.createElement('div');
+      row.className = 'import-system-choice-row';
+      const label = document.createElement('span');
+      label.textContent = `${importClassName(item.classId)} (published as "${item.hcpName}") — which handicap system is this?`;
+      const select = document.createElement('select');
+      item.candidates.forEach((key) => {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = importSystemLabel(key);
+        select.appendChild(opt);
+      });
+      select.value = importSystemOverrides[item.classId];
+      select.addEventListener('change', () => {
+        importSystemOverrides[item.classId] = select.value;
+      });
+      row.append(label, select);
+      importSystemChoices.appendChild(row);
+    });
+  }
+
+  async function importSelectedBoats() {
+    if (!activeRaceId || !importEventId) return;
+    const classIds = Array.from(importClassesList.querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.value);
+    if (!classIds.length) {
+      setImportStatus('Select at least one class to import.', true);
+      return;
+    }
+    setImportStatus('Importing…');
+    try {
+      const data = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/import/manage2sail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: importEventId, classIds, systemOverrides: importSystemOverrides })
+      });
+      raceState = data.race;
+      render();
+      const needsChoice = data.needsSystemChoice || [];
+      if (needsChoice.length) {
+        await renderSystemChoices(needsChoice);
+        const names = needsChoice.map((c) => importClassName(c.classId)).join(', ');
+        setImportStatus(
+          `Added ${data.added}, updated ${data.updated}. Pick a handicap system below for ${names}, then click Import again.`,
+          true
+        );
+        return;
+      }
+      importSystemChoices.innerHTML = '';
+      importSystemOverrides = {};
+      const skippedNote = data.skipped ? `, skipped ${data.skipped}` : '';
+      await loadImportHandicapSystems();
+      const conversionNote = (data.conversions || [])
+        .map((c) => `${importClassName(c.classId)}: ${importSystemLabel(c.system)}`)
+        .join('; ');
+      setImportStatus(`Added ${data.added}, updated ${data.updated}${skippedNote}.${conversionNote ? ' ' + conversionNote : ''}`);
+    } catch (e) {
+      setImportStatus(e.message, true);
+    }
+  }
+
   // ---- Course / track chart -------------------------------------------
 
   const CHART_PALETTE = ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#34d399', '#fb923c', '#60a5fa', '#facc15'];
@@ -1092,6 +1271,7 @@
         return {
           boatId: b.id,
           name: b.name,
+          sailNumber: b.sailNumber || '',
           mmsi: b.mmsi || '',
           tcf,
           startTime: b.startTime,
@@ -1184,6 +1364,14 @@
 
     const tdName = document.createElement('td');
     tdName.append(selfBtn, nameSpan);
+
+    const sailNumberInput = document.createElement('input');
+    sailNumberInput.type = 'text';
+    sailNumberInput.className = 'sail-number-input';
+    sailNumberInput.placeholder = 'Sail #';
+    sailNumberInput.addEventListener('change', () => setSailNumber(boatId, sailNumberInput.value.trim()));
+    const tdSailNumber = document.createElement('td');
+    tdSailNumber.appendChild(sailNumberInput);
 
     const mmsiInput = document.createElement('input');
     mmsiInput.type = 'text';
@@ -1351,7 +1539,7 @@
     const tdRemove = document.createElement('td');
     tdRemove.appendChild(removeBtn);
 
-    tr.append(tdName, tdMmsi, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
+    tr.append(tdName, tdSailNumber, tdMmsi, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
 
     return {
       tr,
@@ -1359,6 +1547,7 @@
       nameSpan,
       tdEstFinish,
       tdVsSelf,
+      sailNumberInput,
       mmsiInput,
       tcfInput,
       vetSelect,
@@ -1448,6 +1637,7 @@
     exportBtn.hidden = !raceState;
     exportOfflineBtn.hidden = !raceState;
     courseSection.hidden = !raceState;
+    raceImportSection.hidden = !raceState || !raceImportEnabled;
 
     if (!raceState) {
       emptyMsg.hidden = true;
@@ -1530,6 +1720,9 @@
       const isSelf = b.boatId === raceState.selfBoatId;
       row.selfBtn.textContent = isSelf ? '★' : '☆';
       row.selfBtn.classList.toggle('active', isSelf);
+      if (document.activeElement !== row.sailNumberInput) {
+        row.sailNumberInput.value = b.sailNumber || '';
+      }
       if (document.activeElement !== row.mmsiInput) {
         row.mmsiInput.value = b.mmsi;
       }
@@ -1687,6 +1880,12 @@
     courseToggleBtn.textContent = (courseBody.hidden ? '▸' : '▾') + ' Course & chart';
     if (!courseBody.hidden) renderChart();
   });
+  raceImportToggleBtn.addEventListener('click', () => {
+    raceImportBody.hidden = !raceImportBody.hidden;
+    raceImportToggleBtn.textContent = (raceImportBody.hidden ? '▸' : '▾') + ' Import boats from Manage2Sail';
+  });
+  importFindClassesBtn.addEventListener('click', findImportClasses);
+  importBoatsBtn.addEventListener('click', importSelectedBoats);
   addMarkBtn.addEventListener('click', () => {
     markRefs.push(buildMarkRow(null));
     renderMarkRows();
@@ -1705,6 +1904,7 @@
 
   async function init() {
     await loadVetEnabled();
+    await loadRaceImportEnabled();
     await Promise.all([loadVessels(), loadBoatRegistry(), loadHandicapRegister(false), loadRacesList()]);
     await loadRaceState();
     render();

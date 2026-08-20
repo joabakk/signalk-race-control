@@ -289,6 +289,65 @@ main {
   gap: 0.75rem;
 }
 
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.import-row input[type='text'] {
+  flex: 1;
+  min-width: 18rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.import-classes-list {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.import-classes-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.import-system-choices {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.import-system-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.import-system-choice-row select {
+  padding: 0.3rem 0.4rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
 .chart-wrap {
   margin-top: 1rem;
 }
@@ -467,7 +526,8 @@ tbody tr.dnf td {
   color: var(--muted);
 }
 
-.mmsi-input {
+.mmsi-input,
+.sail-number-input {
   width: 7rem;
   padding: 0.3rem 0.4rem;
   background: var(--panel);

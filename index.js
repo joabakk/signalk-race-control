@@ -125,6 +125,92 @@ async function resolveHandicapCsvUrl(sourceUrl) {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
 }
 
+// Manage2Sail has no public "list classes for this event" API — the event
+// page itself embeds the classes ("regattas" in their terminology) as JSON
+// in a window.boostrapedResourceData script tag, and the event's own GUID
+// (needed for the entries API below) only appears in a support-form link on
+// the same page. Both are scraped from the page's HTML.
+function parseManage2SailEventPage(html) {
+  const eventIdMatch = html.match(/EventIssue\?eventId=([0-9a-f-]{36})/i);
+  if (!eventIdMatch) {
+    throw new Error("Could not find this event's id on the page — check the URL is a Manage2Sail event page");
+  }
+  const dataMatch = html.match(/window\.boostrapedResourceData\s*=\s*(\{.*?\});/s);
+  if (!dataMatch) {
+    throw new Error('Could not find class data on the page — check the URL is a Manage2Sail event page');
+  }
+  let data;
+  try {
+    data = JSON.parse(dataMatch[1]);
+  } catch (e) {
+    throw new Error('Could not parse class data from the Manage2Sail page');
+  }
+  const classes = (data.Regatta || []).map((r) => ({ id: r.Id, name: r.Name }));
+  return { eventId: eventIdMatch[1], classes };
+}
+
+// Many entries (dinghies, small keelboats) have no named boat — the display
+// name falls back through BoatName -> SailNumber -> TeamName -> SkipperName.
+// SailNumber comes before Team/SkipperName specifically because it
+// identifies the boat itself (stable across a re-import even if the
+// skipper changes), where a person's name doesn't.
+//
+// hcp is left as the raw published number here — converting it to a usable
+// TCF depends on which handicap system it's actually under (see
+// HANDICAP_SYSTEMS / resolveHandicapSystem below), which isn't known until
+// the caller has both hcpName and a look at the actual values.
+function parseManage2SailEntries(json) {
+  const hcpName = json.HcpName || '';
+  const entries = [];
+  let skipped = 0;
+  (json.Entries || []).forEach((e) => {
+    const name = ((e.BoatName || e.SailNumber || e.TeamName || e.SkipperName || '') + '').trim();
+    const hcp = parseFloat(((e.Hcp || '') + '').replace(',', '.'));
+    if (!name || !isFinite(hcp) || hcp <= 0) {
+      skipped++;
+      return;
+    }
+    entries.push({ name, hcp, sailNumber: e.SailNumber || '' });
+  });
+  return { hcpName, entries, skipped };
+}
+
+// Handicap systems this plugin knows how to turn into a Time-on-Time TCF
+// (corrected = elapsed * TCF, higher = faster). "tcf" is the fallback: the
+// published number is assumed to already be usable as-is. Yardstick systems
+// work the other way around (lower number = faster boat) and aren't a
+// direct multiplier, so they need the conversion below instead.
+const HANDICAP_SYSTEMS = [
+  { key: 'tcf', label: 'Time-on-Time — use the published number as TCF directly', convert: (hcp) => hcp },
+  { key: 'ys', label: 'Yardstick — YS (German/DSV, scale 100): TCF = 100 / number', convert: (hcp) => 100 / hcp },
+  { key: 'py', label: 'Portsmouth Yardstick — PY/PN (RYA, scale 1000): TCF = 1000 / number', convert: (hcp) => 1000 / hcp }
+];
+
+function findHandicapSystem(key) {
+  return HANDICAP_SYSTEMS.find((s) => s.key === key) || null;
+}
+
+// hcpName alone doesn't reliably say which system is in play — different
+// clubs/countries publish under the same label with very different scales.
+// Where the label maps to exactly one system whose scale actually matches
+// the observed values, resolve automatically; otherwise report the
+// candidates so the caller can ask the user to pick.
+function resolveHandicapSystem(hcpName, sampleHcpValues) {
+  const name = (hcpName || '').trim().toUpperCase();
+  const looksDsvScale = sampleHcpValues.length > 0 && sampleHcpValues.every((v) => v >= 40 && v <= 250);
+  const looksRyaScale = sampleHcpValues.length > 0 && sampleHcpValues.every((v) => v >= 400 && v <= 3000);
+  if (name === 'YS') {
+    if (looksDsvScale && !looksRyaScale) return { resolved: 'ys' };
+    if (looksRyaScale && !looksDsvScale) return { resolved: 'py' };
+    return { resolved: null, candidates: ['ys', 'py', 'tcf'] };
+  }
+  if (name === 'PY' || name === 'PN') {
+    return { resolved: 'py' };
+  }
+  // Unrecognized/blank/ORC/IRC/etc. — default to treating it as already TCF.
+  return { resolved: 'tcf' };
+}
+
 function makeRaceId() {
   return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
@@ -164,6 +250,7 @@ function ensureRaceShape(race) {
     if (b.dnf === undefined) b.dnf = false;
     if (b.dnfPosition === undefined) b.dnfPosition = null;
     if (b.startTime === undefined) b.startTime = null;
+    if (b.sailNumber === undefined) b.sailNumber = null;
   });
 }
 
@@ -269,6 +356,7 @@ function buildOfflineTimerHtml(race, defaultTcf) {
     boats: Object.values(race.boats).map((b) => ({
       id: b.id,
       name: b.name,
+      sailNumber: b.sailNumber || null,
       tcf: b.tcf != null ? b.tcf : defaultTcf,
       startTime: b.startTime || null,
       finishTime: b.finishTime || null,
@@ -329,6 +417,7 @@ tbody tr.finished td { color: var(--good); }
 tbody tr.dnf td { color: var(--muted); }
 .dnf-tag { color: var(--bad); font-weight: 700; font-size: 0.85rem; letter-spacing: 0.03em; }
 .tcf-input { width: 5.5rem; padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+.sail-number-input { width: 5.5rem; padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
 .tcf-input::-webkit-outer-spin-button, .tcf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .tcf-input[type='number'] { -moz-appearance: textfield; }
 .self-btn { background: none; border: none; padding: 0 0.3rem 0 0; font-size: 1rem; color: var(--muted); cursor: pointer; vertical-align: middle; }
@@ -380,6 +469,7 @@ tbody tr.dnf td { color: var(--muted); }
       <thead>
         <tr>
           <th>Boat</th>
+          <th>Sail #</th>
           <th>TCF</th>
           <th>Start time</th>
           <th>Elapsed</th>
@@ -653,6 +743,20 @@ tbody tr.dnf td { color: var(--muted); }
     var tdName = document.createElement('td');
     tdName.append(selfBtn, nameSpan);
 
+    var sailNumberInput = document.createElement('input');
+    sailNumberInput.type = 'text';
+    sailNumberInput.className = 'sail-number-input';
+    sailNumberInput.placeholder = 'Sail #';
+    sailNumberInput.addEventListener('change', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.sailNumber = sailNumberInput.value.trim() || null;
+      save();
+      render();
+    });
+    var tdSailNumber = document.createElement('td');
+    tdSailNumber.appendChild(sailNumberInput);
+
     var tcfInput = document.createElement('input');
     tcfInput.type = 'number';
     tcfInput.step = '0.001';
@@ -813,9 +917,9 @@ tbody tr.dnf td { color: var(--muted); }
     var tdRemove = document.createElement('td');
     tdRemove.appendChild(removeBtn);
 
-    tr.append(tdName, tdTcf, tdStart, tdElapsed, tdCorrected, tdVsSelf, tdFinish, tdRemove);
+    tr.append(tdName, tdSailNumber, tdTcf, tdStart, tdElapsed, tdCorrected, tdVsSelf, tdFinish, tdRemove);
     return {
-      tr: tr, selfBtn: selfBtn, nameSpan: nameSpan, tcfInput: tcfInput,
+      tr: tr, selfBtn: selfBtn, nameSpan: nameSpan, sailNumberInput: sailNumberInput, tcfInput: tcfInput,
       startTimeInput: startTimeInput, startNowBtn: startNowBtn, startClearBtn: startClearBtn,
       tdElapsed: tdElapsed, tdCorrected: tdCorrected, tdVsSelf: tdVsSelf,
       finishNormalWrap: finishNormalWrap, finishTimeInput: finishTimeInput, dnfWrap: dnfWrap
@@ -853,6 +957,7 @@ tbody tr.dnf td { color: var(--muted); }
       var isSelf = b.id === race.selfBoatId;
       row.selfBtn.textContent = isSelf ? '★' : '☆';
       row.selfBtn.classList.toggle('active', isSelf);
+      if (document.activeElement !== row.sailNumberInput) row.sailNumberInput.value = b.sailNumber || '';
       if (document.activeElement !== row.tcfInput) row.tcfInput.value = b.tcf;
       if (document.activeElement !== row.startTimeInput) {
         row.startTimeInput.value = race.multiDay ? tsToDateTimeInputValue(b.startTime) : tsToTimeInputValue(b.startTime);
@@ -905,7 +1010,7 @@ tbody tr.dnf td { color: var(--muted); }
     if (!name) { setStatus('Enter a boat name to add.', true); addBoatName.focus(); return; }
     var tcf = parseFloat(addBoatTcf.value);
     if (!isFinite(tcf) || tcf <= 0) tcf = race.defaultTcf || 1.0;
-    race.boats.push({ id: genId(), name: name, tcf: tcf, startTime: null, finishTime: null, dnf: false });
+    race.boats.push({ id: genId(), name: name, sailNumber: null, tcf: tcf, startTime: null, finishTime: null, dnf: false });
     save();
     addBoatName.value = '';
     addBoatName.focus();
@@ -919,13 +1024,13 @@ tbody tr.dnf td { color: var(--muted); }
 
   downloadCsvBtn.addEventListener('click', function () {
     var fmtWhen = race.multiDay ? tsToDateTimeInputValue : tsToTimeInputValue;
-    var rows = [['Rank', 'Boat', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status']];
+    var rows = [['Rank', 'Boat', 'Sail Number', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status']];
     rankedList().forEach(function (r, i) {
       var status = r.boat.dnf ? 'DNF' : r.boat.finishTime ? 'Finished' : race.startTime ? 'Racing' : 'Not started';
       var rankLabel = r.boat.dnf ? 'DNF' : r.rankMs != null ? String(i + 1) : '';
       var start = effectiveStart(r.boat);
       rows.push([
-        rankLabel, r.boat.name, r.boat.tcf, start ? fmtWhen(start) : '', fmtDuration(r.elapsedMs), fmtDuration(r.correctedMs),
+        rankLabel, r.boat.name, r.boat.sailNumber || '', r.boat.tcf, start ? fmtWhen(start) : '', fmtDuration(r.elapsedMs), fmtDuration(r.correctedMs),
         r.boat.finishTime ? fmtWhen(r.boat.finishTime) : '', status
       ]);
     });
@@ -981,6 +1086,12 @@ module.exports = function (app) {
         type: 'boolean',
         title:
           'Use the VET-tall register for autocomplete and per-boat handicap alternatives. When off, every boat is treated as outside VET: TCF is remembered per boat name across races instead.',
+        default: false
+      },
+      raceImportEnabled: {
+        type: 'boolean',
+        title:
+          'Allow importing a complete fleet (every boat, with TCF) into a race from an external regatta system — currently Manage2Sail. Off by default, since it fetches from a third-party site and bulk-adds boats.',
         default: false
       }
     }
@@ -1040,6 +1151,12 @@ module.exports = function (app) {
   // boat as outside VET until it's explicitly turned on.
   function isVetEnabled() {
     return !!(plugin.options && plugin.options.vetEnabled === true);
+  }
+
+  // Plugin config setting, same pattern as vetEnabled — off by default, not
+  // per-race, not writable from the webapp itself.
+  function isRaceImportEnabled() {
+    return !!(plugin.options && plugin.options.raceImportEnabled === true);
   }
 
   // A boat only counts as "in VET" for registry-TCF purposes while the
@@ -1386,6 +1503,25 @@ module.exports = function (app) {
     return handicapCache;
   }
 
+  async function fetchManage2SailClasses(eventUrl) {
+    const res = await fetch(eventUrl);
+    if (!res.ok) {
+      throw new Error(`Could not load ${eventUrl}: HTTP ${res.status}`);
+    }
+    const html = await res.text();
+    return parseManage2SailEventPage(html);
+  }
+
+  async function fetchManage2SailEntries(eventId, regattaId) {
+    const url = `https://www.manage2sail.com/api/event/${encodeURIComponent(eventId)}/regattaentry?regattaId=${encodeURIComponent(regattaId)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Manage2Sail entries request failed: HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    return parseManage2SailEntries(json);
+  }
+
   let trackTimer = null;
 
   plugin.start = function (options) {
@@ -1471,7 +1607,7 @@ module.exports = function (app) {
       // calendar days, so the date is included alongside the time —
       // otherwise just the time-of-day, matching how they're entered.
       const fmtWhen = race.multiDay ? formatLocalDateTime : formatLocalTime;
-      const headers = ['Rank', 'Boat', 'MMSI', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status'];
+      const headers = ['Rank', 'Boat', 'Sail Number', 'MMSI', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status'];
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Race Control';
@@ -1506,6 +1642,7 @@ module.exports = function (app) {
         sheet.addRow([
           rankLabel,
           r.boat.name,
+          r.boat.sailNumber || '',
           r.boat.mmsi || '',
           r.boat.tcf,
           start ? fmtWhen(start, tz) : '',
@@ -1516,7 +1653,7 @@ module.exports = function (app) {
         ]);
       });
 
-      const widths = [7, 24, 12, 8, race.multiDay ? 17 : 12, 12, 12, race.multiDay ? 17 : 12, 12];
+      const widths = [7, 24, 12, 12, 8, race.multiDay ? 17 : 12, 12, 12, race.multiDay ? 17 : 12, 12];
       widths.forEach((w, i) => {
         sheet.getColumn(i + 1).width = w;
       });
@@ -1782,6 +1919,7 @@ module.exports = function (app) {
         id: makeBoatId(),
         name,
         mmsi: mmsi || null,
+        sailNumber: null,
         tcf,
         finishTime: null,
         startTime: null,
@@ -1885,6 +2023,17 @@ module.exports = function (app) {
       res.json(boat);
     });
 
+    router.put('/races/:id/boats/:boatId/sailNumber', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const boat = getBoat(race, req.params.boatId);
+      if (!boat) return res.status(404).json({ error: 'No such boat' });
+      const sailNumber = ((req.body && req.body.sailNumber) || '').toString().trim();
+      boat.sailNumber = sailNumber || null;
+      saveState();
+      res.json(boat);
+    });
+
     router.get('/boat-registry', (req, res) => {
       res.json({ boats: Object.values(state.boatRegistry) });
     });
@@ -1921,6 +2070,113 @@ module.exports = function (app) {
       } catch (e) {
         res.status(502).json({ error: 'Could not load handicap register: ' + e.message });
       }
+    });
+
+    // Plugin config setting (Server -> Plugin Config), same pattern as
+    // vet-enabled — the webapp only reads it to know whether to show the
+    // import section at all.
+    router.get('/race-import-enabled', (req, res) => {
+      res.json({ enabled: isRaceImportEnabled() });
+    });
+
+    // Resolves a Manage2Sail event URL to its classes, so the webapp can
+    // offer a picker before importing anything.
+    router.get('/import/manage2sail/classes', async (req, res) => {
+      if (!isRaceImportEnabled()) return res.status(403).json({ error: 'Race import is disabled in the plugin settings' });
+      const eventUrl = ((req.query.eventUrl || '') + '').trim();
+      if (!eventUrl) return res.status(400).json({ error: 'eventUrl is required' });
+      try {
+        const { eventId, classes } = await fetchManage2SailClasses(eventUrl);
+        res.json({ eventId, classes });
+      } catch (e) {
+        res.status(502).json({ error: 'Could not read classes from Manage2Sail: ' + e.message });
+      }
+    });
+
+    // The handicap systems this plugin can convert to a usable TCF — the
+    // webapp uses this to label the disambiguation picker when a class's
+    // system can't be resolved automatically (see resolveHandicapSystem).
+    router.get('/import/manage2sail/handicap-systems', (req, res) => {
+      if (!isRaceImportEnabled()) return res.status(403).json({ error: 'Race import is disabled in the plugin settings' });
+      res.json({ systems: HANDICAP_SYSTEMS.map((s) => ({ key: s.key, label: s.label })) });
+    });
+
+    // Imports every entry from the given class(es) of a Manage2Sail event as
+    // boats in this race — a new boat per entry (name falls back from
+    // BoatName to TeamName/SkipperName). The published Hcp number is
+    // converted to TCF via whichever handicap system the class turns out to
+    // use (see resolveHandicapSystem) — pass systemOverrides: {classId: key}
+    // to pick one explicitly for a class flagged in needsSystemChoice on a
+    // prior call, rather than re-guessing. Re-importing updates TCF on
+    // boats already added by name rather than duplicating them.
+    router.post('/races/:id/import/manage2sail', async (req, res) => {
+      if (!isRaceImportEnabled()) return res.status(403).json({ error: 'Race import is disabled in the plugin settings' });
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const eventId = ((req.body && req.body.eventId) || '').toString().trim();
+      const classIds = Array.isArray(req.body && req.body.classIds) ? req.body.classIds : [];
+      const systemOverrides = (req.body && req.body.systemOverrides) || {};
+      if (!eventId || !classIds.length) {
+        return res.status(400).json({ error: 'eventId and at least one classId are required' });
+      }
+      const existingByName = new Map(Object.values(race.boats).map((b) => [b.name.trim().toLowerCase(), b]));
+      let added = 0;
+      let updated = 0;
+      let skipped = 0;
+      const conversions = [];
+      const needsSystemChoice = [];
+      try {
+        for (const regattaId of classIds) {
+          const { hcpName, entries, skipped: classSkipped } = await fetchManage2SailEntries(eventId, regattaId);
+          skipped += classSkipped;
+          if (!entries.length) continue;
+          const overrideKey = systemOverrides[regattaId];
+          let systemKey = overrideKey && findHandicapSystem(overrideKey) ? overrideKey : null;
+          if (!systemKey) {
+            const resolution = resolveHandicapSystem(
+              hcpName,
+              entries.map((e) => e.hcp)
+            );
+            if (!resolution.resolved) {
+              needsSystemChoice.push({ classId: regattaId, hcpName, candidates: resolution.candidates });
+              continue;
+            }
+            systemKey = resolution.resolved;
+          }
+          const system = findHandicapSystem(systemKey);
+          conversions.push({ classId: regattaId, hcpName, system: systemKey });
+          entries.forEach((entry) => {
+            const tcf = Math.round(system.convert(entry.hcp) * 1000) / 1000;
+            const key = entry.name.toLowerCase();
+            const existing = existingByName.get(key);
+            if (existing) {
+              existing.tcf = tcf;
+              existing.sailNumber = entry.sailNumber || existing.sailNumber;
+              updated++;
+            } else {
+              const boat = {
+                id: makeBoatId(),
+                name: entry.name,
+                mmsi: null,
+                sailNumber: entry.sailNumber || null,
+                tcf,
+                finishTime: null,
+                startTime: null,
+                track: [],
+                dnf: false,
+                dnfPosition: null
+              };
+              race.boats[boat.id] = boat;
+              existingByName.set(key, boat);
+              added++;
+            }
+          });
+        }
+      } catch (e) {
+        return res.status(502).json({ error: 'Could not import from Manage2Sail: ' + e.message });
+      }
+      saveState();
+      res.json({ race: raceWithEstimates(race), added, updated, skipped, conversions, needsSystemChoice });
     });
   };
 
