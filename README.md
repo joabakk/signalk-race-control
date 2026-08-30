@@ -112,16 +112,21 @@ and a live projected finishing order — during and after the race.
 - **Download Offline Timer** — a single self-contained `.html` file, seeded with the
   current race's boats, TCF, and multi-day setting, that runs the core of race timing
   (start/stop/resume/reset, add/remove boats, edit TCF, individual start times,
-  record finishes, DNF, self-comparison) with no server and no internet connection at
+  record finishes, DNF, self-comparison) with no server connection to this plugin at
   all — including its own editable **Race start** field (Now/Clear, right under the
   Start/Stop/Resume/Reset buttons) for backdating or correcting the race's start time
   directly, without needing to click Start Race and lose already-recorded progress —
   a backup for keeping a race running if
   this plugin's server becomes unreachable mid-event. It saves everything to that
   browser's own local storage, so closing and reopening the same downloaded file picks
-  up right where you left off. AIS boat names/positions, VET-tall lookup, and the
-  course/chart all need the live server and aren't included; TCF is entered by hand
-  instead. Also has its own "Download results as CSV" button.
+  up right where you left off. If VET-tall is enabled, the register is seeded in at
+  download time and a **Refresh VET register** link lets the offline page re-fetch the
+  current sheet straight from Google Sheets (no plugin server needed for that — just
+  whatever internet connection the browser has), with the same alternatives dropdown
+  and autocomplete as the main webapp. AIS boat names/positions, the course/chart, and
+  importing a fleet from Manage2Sail still need the live server (Manage2Sail's own API
+  doesn't allow browser-side fetches at all) — TCF is entered by hand for anything the
+  VET register doesn't cover. Also has its own "Download results as CSV" button.
 
 ## Install
 

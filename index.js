@@ -345,7 +345,8 @@ function formatLocalDateTime(utcMs, tzOffsetMinutes) {
 // downloaded file picks up where it left off. Course/chart, AIS boat
 // names/positions, estimated finish, and VET-tall import all need the live
 // server and are intentionally left out.
-function buildOfflineTimerHtml(race, defaultTcf) {
+function buildOfflineTimerHtml(race, defaultTcf, vetOptions) {
+  vetOptions = vetOptions || {};
   const seed = {
     name: race.name,
     startTime: race.startTime,
@@ -353,6 +354,9 @@ function buildOfflineTimerHtml(race, defaultTcf) {
     selfBoatId: race.selfBoatId,
     multiDay: !!race.multiDay,
     defaultTcf: defaultTcf,
+    vetEnabled: !!vetOptions.vetEnabled,
+    handicapCsvUrl: vetOptions.handicapCsvUrl || null,
+    handicapBoats: vetOptions.handicapBoats || [],
     boats: Object.values(race.boats).map((b) => ({
       id: b.id,
       name: b.name,
@@ -398,6 +402,8 @@ h2 { margin: 0 0 0.75rem; font-size: 1.3rem; }
 .race-start-row { margin-top: 0.6rem; display: flex; gap: 0.4rem; justify-content: center; align-items: center; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
 .race-start-row input { padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-variant-numeric: tabular-nums; }
 .race-start-row button { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+.vet-status { display: flex; gap: 0.6rem; justify-content: center; align-items: center; margin-top: 0.4rem; }
+.link-btn { background: none; border: none; padding: 0; font-size: 0.8rem; color: var(--accent); text-decoration: underline; cursor: pointer; }
 button { font-size: 0.95rem; padding: 0.5rem 1.1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--accent); color: #04202e; font-weight: 600; cursor: pointer; }
 button.secondary { background: transparent; color: var(--text); }
 button.danger { border-color: var(--bad); color: var(--bad); }
@@ -420,6 +426,10 @@ tbody tr.dnf td { color: var(--muted); }
 .sail-number-input { width: 5.5rem; padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
 .tcf-input::-webkit-outer-spin-button, .tcf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .tcf-input[type='number'] { -moz-appearance: textfield; }
+.vet-cell { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; min-width: 11rem; }
+.vet-select { max-width: 13rem; padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 0.8rem; }
+.vet-badge { font-size: 0.7rem; color: var(--muted); }
+.vet-badge.warn { color: var(--bad); }
 .self-btn { background: none; border: none; padding: 0 0.3rem 0 0; font-size: 1rem; color: var(--muted); cursor: pointer; vertical-align: middle; }
 .self-btn.active { color: var(--accent); }
 .vs-self { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); }
@@ -438,10 +448,10 @@ tbody tr.dnf td { color: var(--muted); }
 <body>
 <header>
   <h1>Race Control — Offline Timer</h1>
-  <p class="offline-note">Standalone backup — works with no server or internet connection.
+  <p class="offline-note">Standalone backup — works with no server connection to this plugin.
     Everything you do here is saved in this browser only (reopen this same downloaded file
-    to continue). Boat names/positions from AIS, VET-tall handicap lookup, and the
-    course/chart aren't available offline — TCF is entered by hand.</p>
+    to continue). Boat names/positions from AIS and the course/chart aren't available
+    offline. ${vetOptions.vetEnabled ? 'VET-tall handicaps can be refreshed here directly from the internet (see below) — importing a whole fleet from Manage2Sail still needs the live plugin server, though.' : 'TCF is entered by hand.'}</p>
   <h2 id="raceName"></h2>
   <div id="clock" class="clock">00:00:00</div>
   <div class="controls">
@@ -456,11 +466,16 @@ tbody tr.dnf td { color: var(--muted); }
     <button id="raceStartNowBtn" type="button" class="secondary">Now</button>
     <button id="raceStartClearBtn" type="button" class="secondary">Clear</button>
   </div>
+  <div id="vetStatusLine" class="status vet-status" hidden>
+    <span id="vetStatusText"></span>
+    <button id="vetRefreshBtn" type="button" class="link-btn">Refresh VET register</button>
+  </div>
   <div id="statusLine" class="status"></div>
 </header>
 <main>
   <div class="add-boat-row">
-    <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" />
+    <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" list="addBoatSuggestions" />
+    <datalist id="addBoatSuggestions"></datalist>
     <input type="number" id="addBoatTcf" step="0.001" min="0.01" title="TCF" />
     <button id="addBoatBtn">Add Boat</button>
   </div>
@@ -471,6 +486,7 @@ tbody tr.dnf td { color: var(--muted); }
           <th>Boat</th>
           <th>Sail #</th>
           <th>TCF</th>
+          <th id="vetAlternativesTh" hidden>VET alternatives</th>
           <th>Start time</th>
           <th>Elapsed</th>
           <th>Corrected</th>
@@ -507,8 +523,16 @@ tbody tr.dnf td { color: var(--muted); }
       race = seed;
       save();
     }
+    // vetEnabled/handicapCsvUrl reflect the server's current plugin config,
+    // not user-entered race data, so a re-download's seed always wins for
+    // those even if a locally-saved copy is otherwise newer. The fetched
+    // register itself is kept from local storage when present, so an
+    // already-refreshed register isn't thrown away by a re-download.
+    race.vetEnabled = !!seed.vetEnabled;
+    race.handicapCsvUrl = seed.handicapCsvUrl || null;
+    if (!Array.isArray(race.handicapBoats)) race.handicapBoats = seed.handicapBoats || [];
   } catch (e) {
-    race = { name: 'Race', startTime: null, stopTime: null, selfBoatId: null, multiDay: false, boats: [], defaultTcf: 1.0 };
+    race = { name: 'Race', startTime: null, stopTime: null, selfBoatId: null, multiDay: false, boats: [], defaultTcf: 1.0, vetEnabled: false, handicapCsvUrl: null, handicapBoats: [] };
   }
 
   function save() {
@@ -556,6 +580,164 @@ tbody tr.dnf td { color: var(--muted); }
   function setStatus(msg, isError) {
     statusEl.textContent = msg || '';
     statusEl.classList.toggle('error', !!isError);
+  }
+
+  var vetStatusLine = document.getElementById('vetStatusLine');
+  var vetStatusText = document.getElementById('vetStatusText');
+  var vetRefreshBtn = document.getElementById('vetRefreshBtn');
+  var vetAlternativesTh = document.getElementById('vetAlternativesTh');
+  var addBoatSuggestions = document.getElementById('addBoatSuggestions');
+  var handicapVersion = 0;
+  function setVetStatus(msg, isError) {
+    vetStatusText.textContent = msg || '';
+    vetStatusText.classList.toggle('error', !!isError);
+  }
+
+  // Mirrors the plugin server's own CSV parsing (index.js: parseCsvText /
+  // parseNorwegianNumber / parseHandicapSheet) so this page can refresh the
+  // VET-tall register on its own — the sheet export is CORS-friendly and
+  // fetchable directly from a browser, unlike the SSCA lookup page or
+  // Manage2Sail, which is why only VET-tall (not fleet import) works offline.
+  function parseCsvText(text) {
+    var rows = [];
+    var row = [];
+    var field = '';
+    var inQuotes = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+        } else {
+          field += c;
+        }
+      } else if (c === '"') {
+        inQuotes = true;
+      } else if (c === ',') {
+        row.push(field); field = '';
+      } else if (c === '\\n') {
+        row.push(field); rows.push(row); row = []; field = '';
+      } else if (c === '\\r') {
+        // ignore
+      } else {
+        field += c;
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+  function parseNorwegianNumber(s) {
+    if (s == null) return null;
+    var t = String(s).trim().replace(',', '.');
+    if (t === '') return null;
+    var n = Number(t);
+    return isFinite(n) ? n : null;
+  }
+  function parseHandicapSheet(csvText) {
+    var rows = parseCsvText(csvText);
+    var headerRowIndex = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].indexOf('Klasse') !== -1 && rows[i].indexOf('VET 1') !== -1) { headerRowIndex = i; break; }
+    }
+    if (headerRowIndex === -1) throw new Error('Could not find the "Klasse" / "VET 1" header row in the handicap sheet');
+    var header = rows[headerRowIndex];
+    function col(name) { return header.indexOf(name); }
+    var vetCols = [col('VET 1'), col('VET 2'), col('VET 3')].filter(function (i) { return i !== -1; });
+    var classCol = col('Klasse');
+    var ownerCol = col('Eier');
+    var boats = [];
+    for (var r = headerRowIndex + 1; r < rows.length; r++) {
+      var row = rows[r];
+      var name = (row[0] || '').trim();
+      if (!name) continue;
+      var validity = (row[1] || '').trim();
+      var vets = vetCols.map(function (vc, idx) {
+        var value = parseNorwegianNumber(row[vc]);
+        if (value == null) return null;
+        var label = (row[vc - 1] || '').replace(/:\\s*$/, '').trim() || ('VET ' + (idx + 1));
+        return { label: label, value: value };
+      }).filter(Boolean);
+      if (!vets.length) continue;
+      boats.push({
+        name: name,
+        validity: validity,
+        class: classCol !== -1 ? (row[classCol] || '').trim() : '',
+        owner: ownerCol !== -1 ? (row[ownerCol] || '').trim() : '',
+        vets: vets
+      });
+    }
+    return boats;
+  }
+
+  function rebuildAddBoatSuggestions() {
+    addBoatSuggestions.innerHTML = '';
+    var seen = {};
+    race.handicapBoats.forEach(function (b) {
+      var key = b.name.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      var opt = document.createElement('option');
+      opt.value = b.name;
+      addBoatSuggestions.appendChild(opt);
+    });
+  }
+
+  function loadHandicapRegister(force) {
+    if (!race.vetEnabled) return;
+    if (!race.handicapCsvUrl) {
+      setVetStatus('No VET register configured on the server.', true);
+      return;
+    }
+    setVetStatus('Loading VET register…');
+    fetch(race.handicapCsvUrl)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.text();
+      })
+      .then(function (csvText) {
+        race.handicapBoats = parseHandicapSheet(csvText);
+        handicapVersion++;
+        save();
+        rebuildAddBoatSuggestions();
+        setVetStatus('VET register: ' + race.handicapBoats.length + ' boats loaded.');
+        render();
+      })
+      .catch(function (e) {
+        setVetStatus('Could not load VET register: ' + e.message, true);
+      });
+  }
+
+  // Rebuilds a row's VET-alternatives <select> from the current register —
+  // only called when the register itself (re)loads, not every render tick.
+  function refreshVetAlternatives(row, boatName) {
+    var entry = race.handicapBoats.find(function (h) { return h.name.toLowerCase() === boatName.trim().toLowerCase(); });
+    row.vetSelect.innerHTML = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = entry ? 'Pick VET…' : 'No VET match';
+    row.vetSelect.appendChild(placeholder);
+    row.vetSelect.disabled = !entry;
+    if (entry) {
+      entry.vets.forEach(function (v) {
+        var opt = document.createElement('option');
+        opt.value = String(v.value);
+        opt.textContent = v.label + ': ' + v.value;
+        row.vetSelect.appendChild(opt);
+      });
+      var notValid = /ikke/i.test(entry.validity || '');
+      row.vetBadge.textContent = entry.validity ? (notValid ? '⚠ ' + entry.validity : entry.validity) : '';
+      row.vetBadge.classList.toggle('warn', notValid);
+    } else {
+      row.vetBadge.textContent = '';
+      row.vetBadge.classList.remove('warn');
+    }
+  }
+  function syncVetSelectValue(row, tcf) {
+    if (document.activeElement === row.vetSelect) return;
+    var match = Array.from(row.vetSelect.options).find(function (o) {
+      return o.value !== '' && Math.abs(parseFloat(o.value) - tcf) < 1e-9;
+    });
+    row.vetSelect.value = match ? match.value : '';
   }
 
   function pad(n) { return String(n).padStart(2, '0'); }
@@ -776,6 +958,27 @@ tbody tr.dnf td { color: var(--muted); }
     var tdTcf = document.createElement('td');
     tdTcf.appendChild(tcfInput);
 
+    var vetSelect = document.createElement('select');
+    vetSelect.className = 'vet-select';
+    vetSelect.addEventListener('change', function () {
+      var val = parseFloat(vetSelect.value);
+      var boat = findBoat(boatId);
+      if (boat && isFinite(val) && val > 0) {
+        boat.tcf = val;
+        save();
+        render();
+      }
+      // Left showing the picked alternative (synced from tcf on future
+      // renders) rather than reset to the placeholder — see
+      // syncVetSelectValue.
+    });
+    var vetBadge = document.createElement('span');
+    vetBadge.className = 'vet-badge';
+    var tdVet = document.createElement('td');
+    tdVet.className = 'vet-cell';
+    tdVet.hidden = !race.vetEnabled;
+    tdVet.append(vetSelect, vetBadge);
+
     var startTimeInput = document.createElement('input');
     startTimeInput.type = race.multiDay ? 'datetime-local' : 'time';
     startTimeInput.step = '1';
@@ -917,9 +1120,10 @@ tbody tr.dnf td { color: var(--muted); }
     var tdRemove = document.createElement('td');
     tdRemove.appendChild(removeBtn);
 
-    tr.append(tdName, tdSailNumber, tdTcf, tdStart, tdElapsed, tdCorrected, tdVsSelf, tdFinish, tdRemove);
+    tr.append(tdName, tdSailNumber, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdVsSelf, tdFinish, tdRemove);
     return {
       tr: tr, selfBtn: selfBtn, nameSpan: nameSpan, sailNumberInput: sailNumberInput, tcfInput: tcfInput,
+      vetSelect: vetSelect, vetBadge: vetBadge, vetHandicapVersion: -1,
       startTimeInput: startTimeInput, startNowBtn: startNowBtn, startClearBtn: startClearBtn,
       tdElapsed: tdElapsed, tdCorrected: tdCorrected, tdVsSelf: tdVsSelf,
       finishNormalWrap: finishNormalWrap, finishTimeInput: finishTimeInput, dnfWrap: dnfWrap
@@ -959,6 +1163,13 @@ tbody tr.dnf td { color: var(--muted); }
       row.selfBtn.classList.toggle('active', isSelf);
       if (document.activeElement !== row.sailNumberInput) row.sailNumberInput.value = b.sailNumber || '';
       if (document.activeElement !== row.tcfInput) row.tcfInput.value = b.tcf;
+      if (race.vetEnabled) {
+        if (row.vetHandicapVersion !== handicapVersion && document.activeElement !== row.vetSelect) {
+          refreshVetAlternatives(row, b.name);
+          row.vetHandicapVersion = handicapVersion;
+        }
+        syncVetSelectValue(row, b.tcf);
+      }
       if (document.activeElement !== row.startTimeInput) {
         row.startTimeInput.value = race.multiDay ? tsToDateTimeInputValue(b.startTime) : tsToTimeInputValue(b.startTime);
       }
@@ -1050,6 +1261,17 @@ tbody tr.dnf td { color: var(--muted); }
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   });
+
+  vetStatusLine.hidden = !race.vetEnabled;
+  vetAlternativesTh.hidden = !race.vetEnabled;
+  vetRefreshBtn.addEventListener('click', function () { loadHandicapRegister(true); });
+  if (race.vetEnabled) {
+    rebuildAddBoatSuggestions();
+    if (race.handicapBoats.length) {
+      setVetStatus('VET register: ' + race.handicapBoats.length + ' boats loaded (from last download/refresh).');
+    }
+    loadHandicapRegister();
+  }
 
   render();
   setInterval(render, 1000);
@@ -1673,12 +1895,38 @@ module.exports = function (app) {
     // A standalone, self-contained backup timer: current boats/TCF/progress
     // baked in, everything else (start/stop, finishes, DNF, self-compare)
     // runs entirely client-side with no server — see buildOfflineTimerHtml.
-    router.get('/races/:id/export-offline.html', (req, res) => {
+    router.get('/races/:id/export-offline.html', async (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
       const defaultTcf = (plugin.options && plugin.options.defaultTcf) || 1.0;
-      const html = buildOfflineTimerHtml(race, defaultTcf);
+      // The offline page can fetch a fresh VET-tall register on its own later
+      // (the CSV export is CORS-friendly, unlike the SSCA page or
+      // Manage2Sail), but it's seeded with whatever we can get right now so
+      // it's useful before the first live refresh too.
+      let handicapCsvUrl = null;
+      let handicapBoats = [];
+      if (isVetEnabled()) {
+        try {
+          const data = await fetchHandicapBoats();
+          handicapCsvUrl = data.csvUrl;
+          handicapBoats = data.boats;
+        } catch (e) {
+          try {
+            const sourceUrl = (plugin.options && plugin.options.handicapSourceUrl) || DEFAULT_HANDICAP_SOURCE_PAGE;
+            handicapCsvUrl = await resolveHandicapCsvUrl(sourceUrl);
+          } catch (e2) {
+            // Leave handicapCsvUrl null — the offline page's own refresh will
+            // report a clear error until it's tried again with a working
+            // connection.
+          }
+        }
+      }
+      const html = buildOfflineTimerHtml(race, defaultTcf, {
+        vetEnabled: isVetEnabled(),
+        handicapCsvUrl,
+        handicapBoats
+      });
       const safeName = (race.name || 'race').replace(/[^a-z0-9\-_]+/gi, '_').slice(0, 60) || 'race';
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}-offline-timer.html"`);
