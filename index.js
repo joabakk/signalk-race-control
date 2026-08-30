@@ -377,13 +377,27 @@ function buildOfflineTimerHtml(race, defaultTcf, vetOptions) {
   // prematurely close the tag, e.g. via "</script>" in a boat name) is
   // escaped. JSON.parse doesn't need this reversed; < is valid JSON.
   const seedJson = JSON.stringify(seed).replace(/</g, '\\u003c');
+  // The race name also goes straight into HTML attributes/text below (page
+  // title, the iOS home-screen app title) — escaped the normal way for that
+  // context, distinct from the JSON escaping above.
+  const escapedRaceName = String(race.name || 'Race').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Race Control — Offline Timer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>${escapedRaceName} — Offline Timer</title>
+<meta name="theme-color" content="#0f172a" />
+<!-- Lets "Add to Home Screen" on iOS launch this as a standalone app rather
+     than a Safari bookmark — standalone home-screen apps get their own
+     persistent storage that isn't subject to Safari's usual after-a-week
+     cleanup of unvisited sites, which is what actually makes the saved race
+     state stick around between uses. -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="${escapedRaceName}" />
 <style>
 :root {
   --bg: #0f172a; --panel: #1e293b; --border: #334155; --text: #e2e8f0;
@@ -392,7 +406,7 @@ function buildOfflineTimerHtml(race, defaultTcf, vetOptions) {
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); text-align: center; }
+header { padding: max(1.25rem, env(safe-area-inset-top)) 1.5rem 1.25rem; border-bottom: 1px solid var(--border); text-align: center; }
 h1 { margin: 0 0 0.4rem; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); text-transform: uppercase; }
 h2 { margin: 0 0 0.75rem; font-size: 1.3rem; }
 .offline-note { max-width: 40rem; margin: 0 auto 1rem; font-size: 0.8rem; color: var(--muted); }
@@ -411,7 +425,7 @@ button.confirming { background: var(--bad); color: #2a0a0a; border-color: var(--
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .status { min-height: 1.2em; margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted); }
 .status.error { color: var(--bad); }
-main { padding: 1rem 1.5rem 2rem; max-width: 900px; margin: 0 auto; }
+main { padding: 1rem 1.5rem max(2rem, env(safe-area-inset-bottom)); max-width: 900px; margin: 0 auto; }
 .add-boat-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .add-boat-row input[type='text'] { flex: 1; min-width: 12rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
 .add-boat-row input[type='number'] { width: 6rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
