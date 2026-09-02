@@ -1335,9 +1335,10 @@ module.exports = function (app) {
 
   // Races are kept by id so several can be planned ahead and reviewed after
   // the fact, rather than a single race getting overwritten by Reset.
-  // boatRegistry is a separate, cross-race name->MMSI/TCF memory: once a
-  // boat's MMSI or (for boats outside VET) TCF is entered anywhere, it's
-  // applied automatically next time that name is used in any race.
+  // boatRegistry is a separate, cross-race name->MMSI/sail number/TCF
+  // memory: once a boat's MMSI, sail number, or (for boats outside VET) TCF
+  // is entered anywhere, it's applied automatically next time that name is
+  // used in any race.
   let state = { races: {}, order: [], currentRaceId: null, boatRegistry: {} };
   let dataFile = null;
   const scheduleTimers = new Map(); // raceId -> Timeout, for scheduledStart
@@ -1360,25 +1361,22 @@ module.exports = function (app) {
   }
 
   // Cross-race memory keyed by boat name, merging in whichever fields are
-  // given (mmsi and/or tcf) without clobbering the other. tcf is only ever
-  // written here for boats outside the VET register — see the callers.
+  // given (mmsi, sailNumber, and/or tcf) without clobbering the others. tcf
+  // is only ever written here for boats outside the VET register — see the
+  // callers.
   function upsertBoatRegistry(name, fields) {
     if (!name) return;
     const key = name.trim().toLowerCase();
     const existing = state.boatRegistry[key] || { name: name.trim() };
     existing.name = name.trim();
     if (fields.mmsi) existing.mmsi = String(fields.mmsi).trim();
+    if (fields.sailNumber) existing.sailNumber = String(fields.sailNumber).trim();
     if (fields.tcf != null) existing.tcf = fields.tcf;
     state.boatRegistry[key] = existing;
   }
 
   function getRegistryEntry(name) {
     return state.boatRegistry[(name || '').trim().toLowerCase()] || null;
-  }
-
-  function lookupBoatRegistry(name) {
-    const entry = getRegistryEntry(name);
-    return entry ? entry.mmsi : null;
   }
 
   // vetEnabled is a plugin config setting (Server -> Plugin Config), not
@@ -2165,23 +2163,26 @@ module.exports = function (app) {
       if (!name) {
         return res.status(400).json({ error: 'name is required' });
       }
+      const registryEntry = getRegistryEntry(name);
       const givenMmsi = ((req.body && req.body.mmsi) || '').toString().trim();
-      const mmsi = givenMmsi || lookupBoatRegistry(name);
+      const mmsi = givenMmsi || (registryEntry && registryEntry.mmsi) || null;
       if (mmsi) upsertBoatRegistry(name, { mmsi });
+      const givenSailNumber = ((req.body && req.body.sailNumber) || '').toString().trim();
+      const sailNumber = givenSailNumber || (registryEntry && registryEntry.sailNumber) || null;
+      if (sailNumber) upsertBoatRegistry(name, { sailNumber });
       const defaultTcf = (plugin.options && plugin.options.defaultTcf) || 1.0;
       // A remembered TCF only applies to boats outside VET — a VET-matched
       // boat should be picked fresh from the register's own dropdown rather
       // than silently carrying over a number from wherever it last raced.
       let tcf = defaultTcf;
-      if (!isVetMatch(name)) {
-        const remembered = getRegistryEntry(name);
-        if (remembered && remembered.tcf != null) tcf = remembered.tcf;
+      if (!isVetMatch(name) && registryEntry && registryEntry.tcf != null) {
+        tcf = registryEntry.tcf;
       }
       const boat = {
         id: makeBoatId(),
         name,
         mmsi: mmsi || null,
-        sailNumber: null,
+        sailNumber,
         tcf,
         finishTime: null,
         startTime: null,
@@ -2292,6 +2293,7 @@ module.exports = function (app) {
       if (!boat) return res.status(404).json({ error: 'No such boat' });
       const sailNumber = ((req.body && req.body.sailNumber) || '').toString().trim();
       boat.sailNumber = sailNumber || null;
+      if (boat.sailNumber) upsertBoatRegistry(boat.name, { sailNumber: boat.sailNumber });
       saveState();
       res.json(boat);
     });

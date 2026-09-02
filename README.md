@@ -49,10 +49,10 @@ and a live projected finishing order — during and after the race.
   that name is added to any race. A boat that *is* VET-matched never has its TCF
   carried over this way — it always starts from the default until you pick a VET
   alternative or edit it again.
-- **MMSI, remembered across races** — set once per boat (or picked up automatically
-  from a live AIS/self vessel with a matching name), it's remembered in a small
-  cross-race registry: add a boat with the same name in a later race and its MMSI
-  fills in on its own.
+- **MMSI and sail number, remembered across races** — set once per boat (MMSI can
+  also be picked up automatically from a live AIS/self vessel with a matching name),
+  both are remembered in a small cross-race registry: add a boat with the same name
+  in a later race and its MMSI and sail number fill in on their own.
 - **Import a whole fleet from Manage2Sail** — off by default (`raceImportEnabled` in
   the plugin's settings, alongside `vetEnabled`); once turned on, an **Import boats
   from Manage2Sail** section lets you paste a Manage2Sail event URL, pick one or more
