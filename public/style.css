@@ -385,6 +385,33 @@ main {
   min-width: 5rem;
 }
 
+.marks-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-width: 6rem;
+}
+
+.mark-pill {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.mark-pill.rounded {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04202e;
+}
+
 .est-finish {
   font-size: 0.85rem;
   color: var(--muted);

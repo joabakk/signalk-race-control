@@ -88,9 +88,16 @@ and a live projected finishing order — during and after the race.
   live AIS position and speed and the race has a finish line, the plugin projects a
   finish time and corrected time from its remaining distance and speed, and ranks it
   accordingly. The distance routes around whichever marks the boat hasn't rounded yet
-  (detected automatically from its recorded track passing within ~0.1nm of each mark
-  in order) rather than cutting straight to the finish — accuracy still depends on
-  that detection actually catching each rounding.
+  (detected automatically from its recorded track passing within a configurable radius
+  — `markRoundingRadiusM`, 100m by default — of each mark in order) rather than
+  cutting straight to the finish — accuracy still depends on that detection actually
+  catching each rounding. A rounding can also be recorded by hand: each boat's row has
+  a numbered pill per mark in the **Marks** column — click one to mark it rounded right
+  now, click again to clear it — for a boat with no MMSI/AIS at all, or to correct one
+  the automatic detection missed. Either source counts toward the same rounding, and
+  for a boat still racing with no AIS-based estimate to rank by, marks rounded (by
+  either method) takes priority over raw elapsed time, so a boat further round the
+  course still ranks ahead even without live tracking.
 - **Stop / call off the race** — freezes elapsed/corrected time for everyone without
   touching boats, finish times, or the course (unlike Reset, which clears the race
   back to not-started), and marks every boat that hadn't finished as **DNF**,
@@ -203,3 +210,7 @@ finish time/rank for boats still racing, when the plugin has enough to estimate 
   setting, not a per-race or webapp-side option — change it under
   **Server → Plugin Config → Race Control** and restart the plugin (the server does
   this automatically on save) for the webapp to pick it up.
+- The mark-rounding radius used for the estimated finish time and remaining-distance
+  calculations (`markRoundingRadiusM`, 100m by default) is also a plugin setting —
+  loosen it for a fleet with noisier AIS tracks, or tighten it if marks sit close
+  together and a boat's radius circles are overlapping.

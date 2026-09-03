@@ -251,6 +251,7 @@ function ensureRaceShape(race) {
     if (b.dnfPosition === undefined) b.dnfPosition = null;
     if (b.startTime === undefined) b.startTime = null;
     if (b.sailNumber === undefined) b.sailNumber = null;
+    if (!b.markTimes) b.markTimes = {};
   });
 }
 
@@ -1329,6 +1330,12 @@ module.exports = function (app) {
         title:
           'Allow importing a complete fleet (every boat, with TCF) into a race from an external regatta system — currently Manage2Sail. Off by default, since it fetches from a third-party site and bulk-adds boats.',
         default: false
+      },
+      markRoundingRadiusM: {
+        type: 'number',
+        title:
+          'How close (in meters) an AIS-tracked boat must come to a mark for it to count as rounded, for the estimated finish time and remaining-distance calculations',
+        default: 100
       }
     }
   };
@@ -1453,27 +1460,56 @@ module.exports = function (app) {
   }
 
   // A mark counts as "rounded" once the boat's recorded track came within
-  // this radius of it. ~0.1nm (~185m) — loose enough to tolerate AIS
-  // position jitter and the 15s sampling gap (a boat doing 7kn covers about
-  // 0.03nm between samples) without needing an exact pass.
-  const MARK_ROUNDING_RADIUS_NM = 0.1;
+  // this radius of it — meters, configurable (plugin config,
+  // markRoundingRadiusM), converted to nautical miles for distanceNm().
+  // 100m by default — loose enough to tolerate AIS position jitter and the
+  // 15s sampling gap (a boat doing 7kn covers about 55m between samples)
+  // without needing an exact pass.
+  function markRoundingRadiusNm() {
+    const meters = (plugin.options && plugin.options.markRoundingRadiusM) || 100;
+    return meters / 1852;
+  }
 
   // Scans a boat's recorded track chronologically, advancing to the next
   // mark each time the track comes within rounding radius of the current
   // one — so it naturally requires marks to be rounded in course order.
   // Automatic (no manual "boat X rounded mark Y" input) by design, at the
   // cost of missing a rounding if a boat cuts far outside the radius.
-  function countRoundedMarks(race, boat) {
+  function countAutoRoundedMarks(race, boat) {
     const marks = race.course.marks;
     if (!marks.length || !boat.track || !boat.track.length) return 0;
+    const radiusNm = markRoundingRadiusNm();
     let markIdx = 0;
     for (const pt of boat.track) {
       if (markIdx >= marks.length) break;
-      if (distanceNm(pt, marks[markIdx]) <= MARK_ROUNDING_RADIUS_NM) {
+      if (distanceNm(pt, marks[markIdx]) <= radiusNm) {
         markIdx++;
       }
     }
     return markIdx;
+  }
+
+  // A committee member can also record a mark rounding by hand (with its
+  // own timestamp) — for a boat with no MMSI/AIS at all, or to correct a
+  // rounding the automatic track-based detection above missed. Counted the
+  // same "in order" way as the automatic detection: a mark only counts if
+  // every mark before it is also recorded, manually or automatically, so a
+  // rounding can't be marked out of course order.
+  function countManualRoundedMarks(race, boat) {
+    const marks = race.course.marks;
+    if (!marks.length || !boat.markTimes) return 0;
+    let count = 0;
+    for (const m of marks) {
+      if (boat.markTimes[m.id] == null) break;
+      count++;
+    }
+    return count;
+  }
+
+  // The higher of the two — a boat only needs one working way to record a
+  // rounding, not both.
+  function countRoundedMarks(race, boat) {
+    return Math.max(countAutoRoundedMarks(race, boat), countManualRoundedMarks(race, boat));
   }
 
   // Distance from the boat's current position, around each remaining mark
@@ -1523,12 +1559,16 @@ module.exports = function (app) {
     };
   }
 
-  // Attaches a live `estimate` to each unfinished boat without mutating the
-  // stored race — it's derived from live data, never persisted.
+  // Attaches a live `estimate` and `roundedMarksCount` to each unfinished
+  // boat without mutating the stored race — both are derived from live/
+  // recorded data, never persisted as such (roundedMarksCount is derived
+  // from markTimes, which is persisted; the count itself isn't).
   function raceWithEstimates(race) {
     const out = JSON.parse(JSON.stringify(race));
     Object.values(out.boats).forEach((b) => {
-      b.estimate = estimateFinish(race, race.boats[b.id]);
+      const boat = race.boats[b.id];
+      b.estimate = estimateFinish(race, boat);
+      b.roundedMarksCount = countRoundedMarks(race, boat);
     });
     return out;
   }
@@ -1546,13 +1586,24 @@ module.exports = function (app) {
         const tcf = boat.tcf != null ? boat.tcf : 1.0;
         const correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
         const estimate = estimateFinish(race, boat);
+        const roundedMarksCount = countRoundedMarks(race, boat);
         const rankMs = boat.dnf ? null : boat.finishTime ? correctedMs : estimate ? estimate.estCorrectedMs : correctedMs;
-        return { boat, elapsedMs, correctedMs, estimate, rankMs };
+        return { boat, elapsedMs, correctedMs, estimate, roundedMarksCount, rankMs };
       })
       .sort((a, b) => {
         if (a.rankMs == null && b.rankMs == null) return a.boat.name.localeCompare(b.boat.name);
         if (a.rankMs == null) return 1;
         if (b.rankMs == null) return -1;
+        // Among still-racing boats with no AIS-based ETA to fall back on
+        // (elapsed-so-far alone says nothing about how much course is
+        // left), a boat recorded further around the course — manually or
+        // automatically — ranks ahead regardless of corrected time so far.
+        // Boats WITH an estimate already have marks-remaining baked into
+        // estCorrectedMs via the distance routing, so this only applies
+        // when neither side has one.
+        if (!a.boat.finishTime && !b.boat.finishTime && !a.estimate && !b.estimate && a.roundedMarksCount !== b.roundedMarksCount) {
+          return b.roundedMarksCount - a.roundedMarksCount;
+        }
         return a.rankMs - b.rankMs;
       });
   }
@@ -2188,7 +2239,8 @@ module.exports = function (app) {
         startTime: null,
         track: [],
         dnf: false,
-        dnfPosition: null
+        dnfPosition: null,
+        markTimes: {}
       };
       race.boats[boat.id] = boat;
       saveState();
@@ -2269,6 +2321,32 @@ module.exports = function (app) {
       } else {
         boat.dnf = false;
         boat.dnfPosition = null;
+      }
+      saveState();
+      res.json(boat);
+    });
+
+    // Manual mark-rounding: a committee member records (or clears) the
+    // moment a boat rounded a specific mark, independent of the automatic
+    // AIS track-based detection — for a boat with no MMSI/AIS at all, or to
+    // correct a rounding the automatic detection missed. See
+    // countManualRoundedMarks/countRoundedMarks for how the two combine.
+    router.put('/races/:id/boats/:boatId/markTimes/:markId', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const boat = getBoat(race, req.params.boatId);
+      if (!boat) return res.status(404).json({ error: 'No such boat' });
+      const mark = race.course.marks.find((m) => m.id === req.params.markId);
+      if (!mark) return res.status(404).json({ error: 'No such mark' });
+      const raw = req.body ? req.body.time : undefined;
+      if (raw === null) {
+        delete boat.markTimes[mark.id];
+      } else {
+        const t = Number(raw);
+        if (!isFinite(t) || t <= 0) {
+          return res.status(400).json({ error: 'time must be an epoch-millisecond timestamp or null' });
+        }
+        boat.markTimes[mark.id] = t;
       }
       saveState();
       res.json(boat);
@@ -2454,7 +2532,8 @@ module.exports = function (app) {
                 startTime: null,
                 track: [],
                 dnf: false,
-                dnfPosition: null
+                dnfPosition: null,
+                markTimes: {}
               };
               race.boats[boat.id] = boat;
               existingByName.set(key, boat);

@@ -771,6 +771,28 @@
     }
   }
 
+  // Records (or, with ts: null, clears) a boat's own manually-entered
+  // rounding time for one specific mark — independent of the automatic
+  // AIS-track-based detection, for a boat with no MMSI/AIS at all or to
+  // correct a rounding the automatic detection missed.
+  async function setMarkTime(boatId, markId, ts) {
+    if (!activeRaceId) return;
+    try {
+      const boat = await fetchJSON(
+        `${API}/races/${encodeURIComponent(activeRaceId)}/boats/${encodeURIComponent(boatId)}/markTimes/${encodeURIComponent(markId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ time: ts })
+        }
+      );
+      raceState.boats[boatId] = boat;
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
   async function setMmsi(boatId, mmsi) {
     if (!activeRaceId) return;
     try {
@@ -1404,6 +1426,8 @@
           finishTime: b.finishTime,
           dnf: !!b.dnf,
           dnfPosition: b.dnfPosition || null,
+          markTimes: b.markTimes || {},
+          roundedMarksCount: b.roundedMarksCount || 0,
           elapsedMs,
           correctedMs,
           estimate,
@@ -1414,6 +1438,13 @@
         if (a.rankMs == null && b.rankMs == null) return a.name.localeCompare(b.name);
         if (a.rankMs == null) return 1;
         if (b.rankMs == null) return -1;
+        // Mirrors the server's rankedBoatList: with no AIS-based ETA to
+        // fall back on, a boat recorded further around the course (by
+        // either automatic AIS detection or a manually recorded rounding)
+        // ranks ahead regardless of corrected time so far.
+        if (!a.finishTime && !b.finishTime && !a.estimate && !b.estimate && a.roundedMarksCount !== b.roundedMarksCount) {
+          return b.roundedMarksCount - a.roundedMarksCount;
+        }
         return a.rankMs - b.rankMs;
       });
   }
@@ -1591,6 +1622,15 @@
 
     const tdElapsed = document.createElement('td');
     const tdCorrected = document.createElement('td');
+    // One small pill button per course mark, in rounding order — click an
+    // unrounded one to record "rounded now", click a rounded one to clear
+    // it. Rebuilt only when the course's marks actually change (see
+    // render()), not every tick. Independent of the automatic AIS
+    // track-based rounding detection; either one counts (see the server's
+    // countRoundedMarks) — this is the manual alternative, for a boat with
+    // no MMSI/AIS at all or to correct a rounding the detection missed.
+    const tdMarks = document.createElement('td');
+    tdMarks.className = 'marks-cell';
     const tdEstFinish = document.createElement('td');
     tdEstFinish.className = 'est-finish';
     const tdVsSelf = document.createElement('td');
@@ -1665,12 +1705,15 @@
     const tdRemove = document.createElement('td');
     tdRemove.appendChild(removeBtn);
 
-    tr.append(tdName, tdSailNumber, tdMmsi, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
+    tr.append(tdName, tdSailNumber, tdMmsi, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdMarks, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
 
     return {
       tr,
       selfBtn,
       nameSpan,
+      tdMarks,
+      marksSignature: undefined,
+      marksPills: [],
       tdEstFinish,
       tdVsSelf,
       sailNumberInput,
@@ -1869,6 +1912,33 @@
       row.startClearBtn.disabled = !canStart || !b.startTime;
       row.tdElapsed.textContent = fmtDuration(b.elapsedMs);
       row.tdCorrected.textContent = fmtDuration(b.correctedMs);
+
+      const courseMarks = (raceState.course && raceState.course.marks) || [];
+      const marksSig = courseMarks.map((m) => m.id).join(',');
+      if (row.marksSignature !== marksSig) {
+        row.tdMarks.innerHTML = '';
+        row.marksPills = courseMarks.map((m, i) => {
+          const pill = document.createElement('button');
+          pill.type = 'button';
+          pill.className = 'mark-pill';
+          pill.textContent = String(i + 1);
+          pill.addEventListener('click', () => {
+            const boat = raceState.boats[b.boatId];
+            const already = boat && boat.markTimes && boat.markTimes[m.id] != null;
+            setMarkTime(b.boatId, m.id, already ? null : Date.now());
+          });
+          row.tdMarks.appendChild(pill);
+          return pill;
+        });
+        row.marksSignature = marksSig;
+      }
+      courseMarks.forEach((m, i) => {
+        const pill = row.marksPills[i];
+        const t = b.markTimes && b.markTimes[m.id];
+        pill.classList.toggle('rounded', t != null);
+        const label = m.name || `Mark ${i + 1}`;
+        pill.title = t != null ? `${label} — rounded ${new Date(t).toLocaleTimeString()} (click to clear)` : `${label} — click to mark rounded now`;
+      });
 
       if (b.dnf) {
         row.tdEstFinish.textContent = 'DNF';
