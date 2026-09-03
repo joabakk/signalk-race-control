@@ -369,6 +369,7 @@ main {
 .replay-controls {
   margin-top: 0.5rem;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
   max-width: 800px;
@@ -378,11 +379,20 @@ main {
   flex: 1;
 }
 
+.replay-controls input[type='range'].replay-speed-slider {
+  flex: none;
+  width: 5rem;
+}
+
 .replay-controls span {
   font-size: 0.8rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   min-width: 5rem;
+}
+
+.replay-controls span.replay-speed-label {
+  min-width: 2.2rem;
 }
 
 .marks-cell {

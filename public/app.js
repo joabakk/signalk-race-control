@@ -24,6 +24,10 @@
   let lastCourseFormRaceId = undefined; // tracks which race the course form reflects
   let replayLive = true;
   let replayTime = Date.now();
+  let replayPlaying = false;
+  let replaySpeed = 10; // 1x-60x, simulated seconds of replay time per real second
+  let replayPlayTimer = null;
+  let replayPlayLastTick = null;
   let waypoints = []; // [{id, name, lat, lon}] from SignalK resources, for the course editor's "Pick a waypoint" dropdown
 
   const raceSelect = document.getElementById('raceSelect');
@@ -77,6 +81,9 @@
   const replayControls = document.getElementById('replayControls');
   const replaySlider = document.getElementById('replaySlider');
   const replayTimeLabel = document.getElementById('replayTimeLabel');
+  const replayPlayBtn = document.getElementById('replayPlayBtn');
+  const replaySpeedSlider = document.getElementById('replaySpeedSlider');
+  const replaySpeedLabel = document.getElementById('replaySpeedLabel');
   const replayLiveBtn = document.getElementById('replayLiveBtn');
   const raceImportSection = document.getElementById('raceImportSection');
   const raceImportToggleBtn = document.getElementById('raceImportToggleBtn');
@@ -422,6 +429,11 @@
     if (id !== lastCourseFormRaceId) {
       loadCourseFormFromRace();
       lastCourseFormRaceId = id;
+      // A running replay is specific to whichever race's track it was
+      // playing through — switching races (or to none) leaves it with
+      // nothing sensible to keep advancing into.
+      stopReplayPlayback();
+      replayLive = true;
     }
   }
 
@@ -1368,15 +1380,50 @@
     });
     const cutoff = replayLive ? Infinity : replayTime;
 
+    // A boat's track is a series of discrete observations (an AIS sample
+    // roughly every 15s, or a single point at a manually-recorded mark
+    // rounding) — the path between them is drawn as a straight line, but
+    // that's an assumption, not a fact. Two things make that assumption
+    // visible instead of silently implied: a small dot at every actual
+    // observation, and — for the moving "current position" marker — linear
+    // interpolation between the two observations straddling the replay
+    // time, drawn as a hollow ring instead of a solid dot so it reads as
+    // estimated, not observed. Only interpolated across a reasonably tight
+    // gap; beyond that (AIS dropped out, or a mark rounding recorded far
+    // from any real fix) a straight line would just fabricate a plausible-
+    // looking but likely wrong path, so it falls back to the last real
+    // observation instead, same as before this existed.
+    const MAX_INTERP_GAP_MS = 5 * 60 * 1000;
+
     boatsWithTrack.forEach((b, idx) => {
       const color = CHART_PALETTE[idx % CHART_PALETTE.length];
       const pts = b.track.filter((pt) => pt.t <= cutoff);
       if (!pts.length) return;
       const d = pts.map((pt, i) => (i === 0 ? 'M' : 'L') + proj(pt).x.toFixed(1) + ',' + proj(pt).y.toFixed(1)).join(' ');
       parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.85" />`);
-      const last = proj(pts[pts.length - 1]);
-      parts.push(`<circle cx="${last.x}" cy="${last.y}" r="4" fill="${color}" />`);
-      parts.push(`<text x="${(last.x + 7).toFixed(1)}" y="${(last.y + 3).toFixed(1)}" fill="${color}" font-size="10">${escapeHtml(b.name)}</text>`);
+      pts.forEach((pt) => {
+        const p = proj(pt);
+        parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2" fill="${color}" opacity="0.7" />`);
+      });
+
+      const prev = pts[pts.length - 1];
+      let current = prev;
+      let interpolated = false;
+      if (!replayLive && prev.t < cutoff) {
+        const next = b.track.find((pt) => pt.t > cutoff);
+        if (next && next.t - prev.t <= MAX_INTERP_GAP_MS) {
+          const frac = (cutoff - prev.t) / (next.t - prev.t);
+          current = { lat: prev.lat + (next.lat - prev.lat) * frac, lon: prev.lon + (next.lon - prev.lon) * frac };
+          interpolated = true;
+        }
+      }
+      const cur = proj(current);
+      if (interpolated) {
+        parts.push(`<circle cx="${cur.x}" cy="${cur.y}" r="4" fill="${color}" fill-opacity="0.35" stroke="${color}" stroke-width="1.5" stroke-dasharray="2,1.5" />`);
+      } else {
+        parts.push(`<circle cx="${cur.x}" cy="${cur.y}" r="4" fill="${color}" />`);
+      }
+      parts.push(`<text x="${(cur.x + 7).toFixed(1)}" y="${(cur.y + 3).toFixed(1)}" fill="${color}" font-size="10">${escapeHtml(b.name)}</text>`);
     });
 
     courseChart.innerHTML = parts.join('');
@@ -2087,13 +2134,67 @@
     renderMarkRows();
   });
   saveCourseBtn.addEventListener('click', saveCourse);
+
+  // Runs the replay forward at replaySpeed simulated seconds per real
+  // second, on its own timer (independent of the general 1s render tick)
+  // so playback still looks reasonably smooth at low speeds. Stops itself
+  // once it reaches the latest recorded position — there's nothing to play
+  // into beyond that until more track is recorded.
+  function stopReplayPlayback() {
+    replayPlaying = false;
+    replayPlayBtn.textContent = '▶ Play';
+    if (replayPlayTimer) {
+      clearInterval(replayPlayTimer);
+      replayPlayTimer = null;
+    }
+  }
+  function replayTick() {
+    const now = Date.now();
+    const elapsedMs = now - replayPlayLastTick;
+    replayPlayLastTick = now;
+    const maxT = Number(replaySlider.max);
+    if (!isFinite(maxT)) {
+      stopReplayPlayback();
+      return;
+    }
+    replayTime = Math.min(replayTime + elapsedMs * replaySpeed, maxT);
+    replayTimeLabel.textContent = new Date(replayTime).toLocaleTimeString();
+    if (replayTime >= maxT) stopReplayPlayback();
+    renderChart();
+  }
+  function startReplayPlayback() {
+    if (replayPlaying) return;
+    // Nothing to play forward into from Live — start over from the
+    // earliest recorded position instead.
+    if (replayLive) {
+      const minT = Number(replaySlider.min);
+      if (isFinite(minT)) replayTime = minT;
+    }
+    replayLive = false;
+    replayPlaying = true;
+    replayPlayBtn.textContent = '⏸ Pause';
+    replayPlayLastTick = Date.now();
+    replayPlayTimer = setInterval(replayTick, 200);
+    renderChart();
+  }
+
   replaySlider.addEventListener('input', () => {
+    stopReplayPlayback();
     replayLive = false;
     replayTime = Number(replaySlider.value);
     replayTimeLabel.textContent = new Date(replayTime).toLocaleTimeString();
     renderChart();
   });
+  replayPlayBtn.addEventListener('click', () => {
+    if (replayPlaying) stopReplayPlayback();
+    else startReplayPlayback();
+  });
+  replaySpeedSlider.addEventListener('input', () => {
+    replaySpeed = Number(replaySpeedSlider.value);
+    replaySpeedLabel.textContent = replaySpeed + 'x';
+  });
   replayLiveBtn.addEventListener('click', () => {
+    stopReplayPlayback();
     replayLive = true;
     renderChart();
   });

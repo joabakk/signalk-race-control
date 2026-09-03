@@ -79,7 +79,20 @@ and a live projected finishing order — during and after the race.
   already placed from a chart plotter — and pick one to fill in its position). The
   webapp draws them on a built-in chart, overlaid with each AIS-tracked boat's
   recorded track for the current race — drag the **replay** slider to step back
-  through it, or leave it on **Live**. The course is also published as SignalK
+  through it, or leave it on **Live**. Click **Play** to have it step through on its own
+  instead, at whatever speed the adjoining slider is set to (1x-60x); it starts over
+  from the earliest recorded position when played from Live (there's nothing to play
+  forward into from there), stops on its own once it catches up to the latest one, and
+  dragging the main slider or clicking **Live** stops it early. Every actual recorded
+  position (an AIS sample,
+  or a manually-recorded mark rounding) shows as a small dot along the track, so it's
+  clear which points are real; wherever the slider sits between two of them, the boat's
+  position is linearly interpolated and drawn as a hollow ring instead of a solid dot,
+  so an in-between position always reads as estimated rather than observed. It falls
+  back to just the last real position (no ring) instead of interpolating across a gap
+  longer than 5 minutes — AIS dropping out, or a mark rounding recorded far from any
+  real fix — since a straight line across a gap that long would be a guess, not an
+  estimate. The course is also published as SignalK
   waypoint/route resources for any chart plotter (e.g. freeboard-sk) that reads the
   standard resources API — both directions (reading existing waypoints for the
   autocomplete, and publishing the saved course) only do anything if your server has a
@@ -97,7 +110,11 @@ and a live projected finishing order — during and after the race.
   the automatic detection missed. Either source counts toward the same rounding, and
   for a boat still racing with no AIS-based estimate to rank by, marks rounded (by
   either method) takes priority over raw elapsed time, so a boat further round the
-  course still ranks ahead even without live tracking.
+  course still ranks ahead even without live tracking. A manual rounding also records a
+  position for the replay chart — the boat's live position if it has AIS, otherwise the
+  mark's own position (a reasonable stand-in, since rounding a mark means being at it)
+  — so even a boat with no AIS at all shows up on the chart at each mark it's recorded
+  rounding.
 - **Stop / call off the race** — freezes elapsed/corrected time for everyone without
   touching boats, finish times, or the course (unlike Reset, which clears the race
   back to not-started), and marks every boat that hadn't finished as **DNF**,

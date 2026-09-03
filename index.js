@@ -2338,6 +2338,11 @@ module.exports = function (app) {
       if (!boat) return res.status(404).json({ error: 'No such boat' });
       const mark = race.course.marks.find((m) => m.id === req.params.markId);
       if (!mark) return res.status(404).json({ error: 'No such mark' });
+      if (!boat.track) boat.track = [];
+      // Drop any earlier manually-added point for this exact mark first,
+      // whether we're about to replace it or just clearing — tagged with
+      // markId so this can never touch a genuine AIS-recorded sample.
+      boat.track = boat.track.filter((pt) => pt.markId !== mark.id);
       const raw = req.body ? req.body.time : undefined;
       if (raw === null) {
         delete boat.markTimes[mark.id];
@@ -2347,6 +2352,16 @@ module.exports = function (app) {
           return res.status(400).json({ error: 'time must be an epoch-millisecond timestamp or null' });
         }
         boat.markTimes[mark.id] = t;
+        // Record where the boat was at that moment too — its live position
+        // if we have one (accurate, and consistent with its recorded AIS
+        // track), otherwise the mark's own position as a reasonable stand-
+        // in (rounding a mark means being at it). Either way this is what
+        // lets a manually-recorded rounding show up on the replay chart,
+        // even for a boat with no AIS at all.
+        const live = getLivePosition(boat.mmsi);
+        const pos = live || { lat: mark.lat, lon: mark.lon };
+        boat.track.push({ t, lat: pos.lat, lon: pos.lon, markId: mark.id });
+        boat.track.sort((a, b) => a.t - b.t);
       }
       saveState();
       res.json(boat);
