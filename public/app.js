@@ -24,6 +24,7 @@
   let lastCourseFormRaceId = undefined; // tracks which race the course form reflects
   let replayLive = true;
   let replayTime = Date.now();
+  let waypoints = []; // [{id, name, lat, lon}] from SignalK resources, for the course editor's "Pick a waypoint" dropdown
 
   const raceSelect = document.getElementById('raceSelect');
   const newRaceBtn = document.getElementById('newRaceBtn');
@@ -360,6 +361,19 @@
       raceImportEnabled = data.enabled === true;
     } catch (e) {
       raceImportEnabled = false;
+    }
+  }
+
+  // Best-effort, like the underlying resourcesApi calls it wraps — an empty
+  // list (no resources provider registered, or the request fails) just
+  // means the course editor's "Pick a waypoint" dropdowns have nothing to
+  // offer, not a failure worth surfacing.
+  async function loadWaypoints() {
+    try {
+      const data = await fetchJSON(`${API}/waypoints`);
+      waypoints = data.waypoints || [];
+    } catch (e) {
+      waypoints = [];
     }
   }
 
@@ -829,17 +843,118 @@
     return null;
   }
 
+  // Generic substring-match autocomplete, wiring `input` to `dropdown` (a
+  // hidden .suggestions element already sitting next to it in the DOM) —
+  // same matching/keyboard-nav behavior as the boat-name autocomplete
+  // above, but with its own closure-local item/selection state so several
+  // instances (one per course point row) can coexist without stepping on
+  // each other the way sharing the boat autocomplete's module-level state
+  // would.
+  function attachAutocomplete(input, dropdown, getPool, onSelect) {
+    let items = [];
+    let activeIndex = -1;
+
+    function hide() {
+      dropdown.hidden = true;
+      dropdown.innerHTML = '';
+      items = [];
+      activeIndex = -1;
+    }
+    function renderActive() {
+      Array.from(dropdown.children).forEach((el, i) => el.classList.toggle('active', i === activeIndex));
+    }
+    function select(item) {
+      onSelect(item);
+      hide();
+    }
+    function showFor(query) {
+      const q = query.trim().toLowerCase();
+      if (!q) {
+        hide();
+        return;
+      }
+      const matches = getPool()
+        .filter((it) => it.name.toLowerCase().includes(q))
+        .slice(0, 20);
+      items = matches;
+      activeIndex = -1;
+      if (!matches.length) {
+        hide();
+        return;
+      }
+      dropdown.innerHTML = '';
+      matches.forEach((item) => {
+        const div = document.createElement('div');
+        div.className = 'suggestion-item';
+        const idx = item.name.toLowerCase().indexOf(q);
+        if (idx === -1) {
+          div.textContent = item.name;
+        } else {
+          div.innerHTML =
+            escapeHtml(item.name.slice(0, idx)) +
+            '<mark>' +
+            escapeHtml(item.name.slice(idx, idx + q.length)) +
+            '</mark>' +
+            escapeHtml(item.name.slice(idx + q.length));
+        }
+        // mousedown (not click) fires before the input's blur, same reason
+        // as the boat-name suggestions above.
+        div.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          select(item);
+        });
+        dropdown.appendChild(div);
+      });
+      dropdown.hidden = false;
+    }
+
+    input.addEventListener('input', () => showFor(input.value));
+    input.addEventListener('focus', () => {
+      if (input.value.trim()) showFor(input.value);
+    });
+    input.addEventListener('blur', () => hide());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' && items.length) {
+        e.preventDefault();
+        activeIndex = (activeIndex + 1) % items.length;
+        renderActive();
+      } else if (e.key === 'ArrowUp' && items.length) {
+        e.preventDefault();
+        activeIndex = (activeIndex - 1 + items.length) % items.length;
+        renderActive();
+      } else if (e.key === 'Enter' && activeIndex >= 0 && items[activeIndex]) {
+        e.preventDefault();
+        select(items[activeIndex]);
+      } else if (e.key === 'Escape') {
+        hide();
+      }
+    });
+  }
+
   // One name+lat+lon(+optional "use my position") row, shared by start
-  // line, finish line, and mark entry.
+  // line, finish line, and mark entry. The name field autocompletes against
+  // existing SignalK waypoints (e.g. ones already placed on a chart
+  // plotter) — picking one fills in lat/lon (and the name) from it, so a
+  // start/mark/finish position doesn't have to be typed by hand if a
+  // waypoint for it already exists.
   function buildPointRow(point) {
     const row = document.createElement('div');
     row.className = 'course-point-row';
+
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'autocomplete course-name-autocomplete';
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'course-name-input';
     nameInput.placeholder = 'Name (optional)';
+    nameInput.autocomplete = 'off';
     nameInput.value = (point && point.name) || '';
+
+    const nameSuggestions = document.createElement('div');
+    nameSuggestions.className = 'suggestions';
+    nameSuggestions.hidden = true;
+    nameWrap.append(nameInput, nameSuggestions);
 
     const latInput = document.createElement('input');
     latInput.type = 'number';
@@ -869,7 +984,18 @@
       }
     });
 
-    row.append(nameInput, latInput, lonInput, useHereBtn);
+    attachAutocomplete(
+      nameInput,
+      nameSuggestions,
+      () => waypoints,
+      (wp) => {
+        nameInput.value = wp.name;
+        latInput.value = wp.lat;
+        lonInput.value = wp.lon;
+      }
+    );
+
+    row.append(nameWrap, latInput, lonInput, useHereBtn);
     return { row, nameInput, latInput, lonInput };
   }
 
@@ -1905,7 +2031,7 @@
   async function init() {
     await loadVetEnabled();
     await loadRaceImportEnabled();
-    await Promise.all([loadVessels(), loadBoatRegistry(), loadHandicapRegister(false), loadRacesList()]);
+    await Promise.all([loadVessels(), loadBoatRegistry(), loadHandicapRegister(false), loadWaypoints(), loadRacesList()]);
     await loadRaceState();
     render();
     setInterval(render, 1000);

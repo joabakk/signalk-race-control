@@ -257,8 +257,13 @@ main {
   align-items: center;
 }
 
-.course-point-row .course-name-input {
+.course-point-row .course-name-autocomplete {
+  position: relative;
   width: 7rem;
+}
+
+.course-point-row .course-name-input {
+  width: 100%;
   padding: 0.3rem 0.4rem;
   background: var(--panel);
   color: var(--text);

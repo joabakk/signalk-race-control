@@ -75,12 +75,15 @@ and a live projected finishing order — during and after the race.
   **Clear** to undo. Handles races that cross midnight.
 - **Course & chart** — enter lat/lon for the start line, an ordered list of rounding
   marks, and the finish line (or click **Use my position** if you're sitting at that
-  spot). The webapp draws them on a built-in chart, overlaid with each AIS-tracked
-  boat's recorded track for the current race — drag the **replay** slider to step
-  back through it, or leave it on **Live**. The course is also published as SignalK
+  spot, or type a name to autocomplete against existing SignalK waypoints — e.g. ones
+  already placed from a chart plotter — and pick one to fill in its position). The
+  webapp draws them on a built-in chart, overlaid with each AIS-tracked boat's
+  recorded track for the current race — drag the **replay** slider to step back
+  through it, or leave it on **Live**. The course is also published as SignalK
   waypoint/route resources for any chart plotter (e.g. freeboard-sk) that reads the
-  standard resources API — that part only does anything if your server has a
-  resources provider installed; it's a no-op otherwise, never a failure.
+  standard resources API — both directions (reading existing waypoints for the
+  autocomplete, and publishing the saved course) only do anything if your server has a
+  resources provider installed; they're a no-op otherwise, never a failure.
 - **Estimated finish time & live rank** — while a boat is still racing, if it has a
   live AIS position and speed and the race has a finish line, the plugin projects a
   finish time and corrected time from its remaining distance and speed, and ranks it

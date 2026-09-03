@@ -2309,6 +2309,32 @@ module.exports = function (app) {
       res.json({ enabled: isVetEnabled() });
     });
 
+    // Lets the course editor offer existing SignalK waypoints (e.g. ones
+    // already placed on a chart plotter) as start/mark/finish positions,
+    // instead of only typing lat/lon by hand. Best-effort, same spirit as
+    // publishCourseResources — silently returns none if this server has no
+    // resources provider registered, rather than failing the whole course
+    // editor over it.
+    router.get('/waypoints', async (req, res) => {
+      if (!app.resourcesApi || typeof app.resourcesApi.listResources !== 'function') {
+        return res.json({ waypoints: [] });
+      }
+      try {
+        const data = await app.resourcesApi.listResources('waypoints', {});
+        const waypoints = Object.keys(data || {})
+          .map((id) => {
+            const r = data[id] || {};
+            const coords = r.feature && r.feature.geometry && r.feature.geometry.coordinates;
+            if (!Array.isArray(coords) || coords.length < 2) return null;
+            return { id, name: r.name || id, lon: coords[0], lat: coords[1] };
+          })
+          .filter(Boolean);
+        res.json({ waypoints });
+      } catch (e) {
+        res.json({ waypoints: [] });
+      }
+    });
+
     router.put('/races/:id/boats/:boatId/tcf', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
