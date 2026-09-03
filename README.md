@@ -73,6 +73,14 @@ and a live projected finishing order — during and after the race.
 - **Editable finish times** — click **Now** to record a finish as it happens, type a
   specific `HH:MM:SS` into the finish-time field to correct a mistimed click, or
   **Clear** to undo. Handles races that cross midnight.
+- **Start timer** — once a start line is set and a start is scheduled, an expandable
+  **Start timer** panel shows a countdown to the gun alongside three live numbers for
+  this vessel specifically (from its own SignalK GPS/speed, not any other tracked
+  boat): distance to the line, ETA to reach it at current speed, and **time to burn** —
+  the countdown minus that ETA. Positive means time to spare (you'll arrive early, so
+  slow down or take a longer approach); negative means you're behind schedule to make
+  the line before the gun. Disappears once the race actually starts, since the
+  pre-start approach is moot by then.
 - **Course & chart** — enter lat/lon for the start line, an ordered list of rounding
   marks, and the finish line (or click **Use my position** if you're sitting at that
   spot, or type a name to autocomplete against existing SignalK waypoints — e.g. ones

@@ -85,6 +85,14 @@
   const replaySpeedSlider = document.getElementById('replaySpeedSlider');
   const replaySpeedLabel = document.getElementById('replaySpeedLabel');
   const replayLiveBtn = document.getElementById('replayLiveBtn');
+  const startTimerSection = document.getElementById('startTimerSection');
+  const startTimerToggleBtn = document.getElementById('startTimerToggleBtn');
+  const startTimerBody = document.getElementById('startTimerBody');
+  const startCountdownValue = document.getElementById('startCountdownValue');
+  const startDtlValue = document.getElementById('startDtlValue');
+  const startEtaValue = document.getElementById('startEtaValue');
+  const startBurnValue = document.getElementById('startBurnValue');
+  const startTimerNote = document.getElementById('startTimerNote');
   const raceImportSection = document.getElementById('raceImportSection');
   const raceImportToggleBtn = document.getElementById('raceImportToggleBtn');
   const raceImportBody = document.getElementById('raceImportBody');
@@ -875,6 +883,123 @@
       // fall through
     }
     return null;
+  }
+
+  // ---- Start timer ------------------------------------------------------
+  // Countdown to the scheduled start + a live "distance/ETA to the start
+  // line, time to burn" instrument for this vessel — the same thing a
+  // start-line transit timer app shows, computed from this vessel's own
+  // live position/speed (not any other boat's).
+
+  let selfNav = null; // {lat, lon, sogMs} | null, refreshed on its own poll — see below
+
+  async function fetchSelfNav() {
+    try {
+      const [posLeaf, sogLeaf] = await Promise.all([
+        fetchJSON(`${SK_API}/vessels/self/navigation/position`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/navigation/speedOverGround`).catch(() => null)
+      ]);
+      const v = posLeaf && posLeaf.value;
+      if (!v || typeof v.latitude !== 'number' || typeof v.longitude !== 'number') return null;
+      const sogMs = sogLeaf && typeof sogLeaf.value === 'number' ? sogLeaf.value : null;
+      return { lat: v.latitude, lon: v.longitude, sogMs };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  const MS_TO_KNOTS = 1.9438444924574;
+  function toRad(deg) {
+    return (deg * Math.PI) / 180;
+  }
+
+  // Perpendicular distance from a point to the start-line segment (or to
+  // its nearest end, if the point doesn't fall between the two ends) — a
+  // flat-earth approximation local to the line, which is fine at the scale
+  // of a start line and a boat's approach to it (same simplifying
+  // assumption the course chart's own projection already makes).
+  function distanceToSegmentNm(p, a, b) {
+    const meanLat = (a.lat + b.lat + p.lat) / 3;
+    const cosLat = Math.cos(toRad(meanLat)) || 1;
+    const NM_PER_DEG_LAT = 60;
+    const toXY = (pt) => ({ x: pt.lon * cosLat * NM_PER_DEG_LAT, y: pt.lat * NM_PER_DEG_LAT });
+    const P = toXY(p);
+    const A = toXY(a);
+    const B = toXY(b);
+    const abx = B.x - A.x;
+    const aby = B.y - A.y;
+    const lenSq = abx * abx + aby * aby;
+    let t = lenSq > 0 ? ((P.x - A.x) * abx + (P.y - A.y) * aby) / lenSq : 0;
+    t = Math.max(0, Math.min(1, t));
+    const cx = A.x + abx * t;
+    const cy = A.y + aby * t;
+    const dx = P.x - cx;
+    const dy = P.y - cy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function fmtSignedDuration(ms) {
+    const sign = ms < 0 ? '-' : '+';
+    const s = Math.round(Math.abs(ms) / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return sign + (h ? `${h}:${String(m).padStart(2, '0')}` : m) + ':' + String(sec).padStart(2, '0');
+  }
+
+  // Shown whenever there's a start line to approach and the race hasn't
+  // actually started yet (pre-start is moot once it has) — refreshes every
+  // tick from the last-polled selfNav, independent of whether that poll
+  // itself just ran.
+  function renderStartTimer() {
+    const hasStartLine = !!(raceState && raceState.course && raceState.course.startLine);
+    startTimerSection.hidden = !raceState || !hasStartLine || !!raceState.startTime;
+    if (startTimerSection.hidden || startTimerBody.hidden) return;
+
+    const target = raceState.scheduledStart;
+    if (!target) {
+      startCountdownValue.textContent = '--:--:--';
+      startDtlValue.textContent = '--';
+      startEtaValue.textContent = '--:--:--';
+      startBurnValue.textContent = '--';
+      startBurnValue.className = 'start-timer-value';
+      startTimerNote.textContent = 'Set a scheduled start time above to see the countdown and burn time here.';
+      return;
+    }
+    const now = Date.now();
+    const toStartMs = target - now;
+    startCountdownValue.textContent = fmtDuration(Math.max(0, toStartMs));
+
+    if (!selfNav) {
+      startDtlValue.textContent = '--';
+      startEtaValue.textContent = '--:--:--';
+      startBurnValue.textContent = '--';
+      startBurnValue.className = 'start-timer-value';
+      startTimerNote.textContent = "Waiting for this vessel's own position from SignalK.";
+      return;
+    }
+    const [a, b] = raceState.course.startLine;
+    const dtlNm = distanceToSegmentNm(selfNav, a, b);
+    startDtlValue.textContent = `${dtlNm.toFixed(2)}nm`;
+
+    if (selfNav.sogMs == null || selfNav.sogMs < 0.25) {
+      startEtaValue.textContent = '--:--:--';
+      startBurnValue.textContent = '--';
+      startBurnValue.className = 'start-timer-value';
+      startTimerNote.textContent = 'Waiting for this vessel to be making way (SOG) to estimate ETA and burn time.';
+      return;
+    }
+    const sogKn = selfNav.sogMs * MS_TO_KNOTS;
+    const etaMs = (dtlNm / sogKn) * 3600 * 1000;
+    startEtaValue.textContent = new Date(now + etaMs).toLocaleTimeString();
+
+    const burnMs = toStartMs - etaMs;
+    startBurnValue.textContent = fmtSignedDuration(burnMs);
+    startBurnValue.className = 'start-timer-value ' + (burnMs >= 0 ? 'early' : 'late');
+    startTimerNote.textContent =
+      burnMs >= 0
+        ? "Positive: time to spare before the gun at this speed — you'll arrive at the line before it, so you have time to burn."
+        : "Negative: you're behind schedule to reach the line at this speed before the gun.";
   }
 
   // Generic substring-match autocomplete, wiring `input` to `dropdown` (a
@@ -1854,6 +1979,7 @@
     exportOfflineBtn.hidden = !raceState;
     courseSection.hidden = !raceState;
     raceImportSection.hidden = !raceState || !raceImportEnabled;
+    renderStartTimer();
 
     if (!raceState) {
       emptyMsg.hidden = true;
@@ -2123,6 +2249,11 @@
     courseToggleBtn.textContent = (courseBody.hidden ? '▸' : '▾') + ' Course & chart';
     if (!courseBody.hidden) renderChart();
   });
+  startTimerToggleBtn.addEventListener('click', () => {
+    startTimerBody.hidden = !startTimerBody.hidden;
+    startTimerToggleBtn.textContent = (startTimerBody.hidden ? '▸' : '▾') + ' Start timer';
+    if (!startTimerBody.hidden) renderStartTimer();
+  });
   raceImportToggleBtn.addEventListener('click', () => {
     raceImportBody.hidden = !raceImportBody.hidden;
     raceImportToggleBtn.textContent = (raceImportBody.hidden ? '▸' : '▾') + ' Import boats from Manage2Sail';
@@ -2199,14 +2330,27 @@
     renderChart();
   });
 
+  async function refreshSelfNav() {
+    selfNav = await fetchSelfNav();
+    renderStartTimer();
+  }
+
   async function init() {
     await loadVetEnabled();
     await loadRaceImportEnabled();
-    await Promise.all([loadVessels(), loadBoatRegistry(), loadHandicapRegister(false), loadWaypoints(), loadRacesList()]);
+    await Promise.all([
+      loadVessels(),
+      loadBoatRegistry(),
+      loadHandicapRegister(false),
+      loadWaypoints(),
+      loadRacesList(),
+      refreshSelfNav()
+    ]);
     await loadRaceState();
     render();
     setInterval(render, 1000);
     setInterval(loadVessels, 10000);
+    setInterval(refreshSelfNav, 3000);
     setInterval(() => {
       if (activeRaceId) loadRaceState();
     }, 5000);
