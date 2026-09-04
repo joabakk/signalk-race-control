@@ -426,7 +426,7 @@ button.confirming { background: var(--bad); color: #2a0a0a; border-color: var(--
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .status { min-height: 1.2em; margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted); }
 .status.error { color: var(--bad); }
-main { padding: 1rem 1.5rem max(2rem, env(safe-area-inset-bottom)); max-width: 900px; margin: 0 auto; }
+main { padding: 1rem 1.5rem max(2rem, env(safe-area-inset-bottom)); margin: 0 auto; }
 .add-boat-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .add-boat-row input[type='text'] { flex: 1; min-width: 12rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
 .add-boat-row input[type='number'] { width: 6rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
@@ -434,6 +434,8 @@ main { padding: 1rem 1.5rem max(2rem, env(safe-area-inset-bottom)); max-width: 9
 table { width: 100%; min-width: 44rem; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 thead th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
 tbody td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); }
+.boat-name-col { position: sticky; left: 0; z-index: 1; background: var(--bg); }
+thead .boat-name-col { z-index: 2; }
 tbody tr.finished td { color: var(--good); }
 tbody tr.dnf td { color: var(--muted); }
 .dnf-tag { color: var(--bad); font-weight: 700; font-size: 0.85rem; letter-spacing: 0.03em; }
@@ -498,7 +500,7 @@ tbody tr.dnf td { color: var(--muted); }
     <table id="boatsTable">
       <thead>
         <tr>
-          <th>Boat</th>
+          <th class="boat-name-col">Boat</th>
           <th>Sail #</th>
           <th>TCF</th>
           <th id="vetAlternativesTh" hidden>VET alternatives</th>
@@ -817,6 +819,14 @@ tbody tr.dnf td { color: var(--muted); }
         return { boat: boat, elapsedMs: elapsedMs, correctedMs: correctedMs, rankMs: rankMs };
       })
       .sort(function (a, b) {
+        // Self always leads, whatever else is true.
+        var aSelf = a.boat.id === race.selfBoatId;
+        var bSelf = b.boat.id === race.selfBoatId;
+        if (aSelf !== bSelf) return aSelf ? -1 : 1;
+        // Before the race actually starts, nobody has a corrected time to
+        // rank by anyway — leave order exactly as race.boats gave it
+        // (registration order) rather than reshuffling on every add/remove.
+        if (!race.startTime) return 0;
         if (a.rankMs == null && b.rankMs == null) return a.boat.name.localeCompare(b.boat.name);
         if (a.rankMs == null) return 1;
         if (b.rankMs == null) return -1;
@@ -938,6 +948,7 @@ tbody tr.dnf td { color: var(--muted); }
     });
     var nameSpan = document.createElement('span');
     var tdName = document.createElement('td');
+    tdName.className = 'boat-name-col';
     tdName.append(selfBtn, nameSpan);
 
     var sailNumberInput = document.createElement('input');

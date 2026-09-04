@@ -216,7 +216,6 @@ button:disabled {
 
 main {
   padding: 1rem 1.5rem 2rem;
-  max-width: 1000px;
   margin: 0 auto;
 }
 
@@ -589,6 +588,21 @@ thead th {
 tbody td {
   padding: 0.55rem 0.6rem;
   border-bottom: 1px solid var(--border);
+}
+
+/* Frozen first column, so the boat's name stays visible while scrolling
+   the (much wider than most screens, especially phones in landscape)
+   table sideways to reach the other columns. Needs its own opaque
+   background so scrolled-under cells don't show through. */
+.boat-name-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+}
+
+thead .boat-name-col {
+  z-index: 2;
 }
 
 tbody tr.finished td {

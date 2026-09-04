@@ -25,7 +25,13 @@ and a live projected finishing order — during and after the race.
 - **Add/remove boats explicitly** — type a name (autocompletes against the VET
   register, the cross-race boat registry, and any live AIS/self vessel — matching
   anywhere in the name, not just the start) and click **Add Boat**. Boats aren't
-  auto-populated from AIS; you control exactly who's racing.
+  auto-populated from AIS; you control exactly who's racing. Rows stay in the order
+  boats were added — adding or removing one doesn't reshuffle the rest — until the
+  race actually starts, when the table switches to rank order; whichever boat is
+  marked **self** always stays on top regardless of phase. The **Boat** column stays
+  pinned in place while scrolling sideways through the rest of the (wide) table, and
+  the page itself isn't width-capped, so a larger screen shows more columns at once
+  without scrolling.
 - **Elapsed / corrected time** — Time-on-Time correction: `corrected = elapsed × TCF`,
   where TCF is edited per boat directly in the webapp and persisted server-side,
   shared by everyone viewing the page.

@@ -1607,6 +1607,19 @@
         };
       })
       .sort((a, b) => {
+        // Self always leads, whatever else is true — it's the boat whoever
+        // is looking at this screen cares about finding without hunting
+        // for it.
+        const aSelf = a.boatId === raceState.selfBoatId;
+        const bSelf = b.boatId === raceState.selfBoatId;
+        if (aSelf !== bSelf) return aSelf ? -1 : 1;
+        // Before the race actually starts, nobody has a corrected time to
+        // rank by anyway — sorting by name (or anything else derived) just
+        // reshuffled the rows confusingly every time a boat was added or
+        // removed. Rely on sort's stability and leave order exactly as
+        // Object.values(raceState.boats) gave it (i.e. registration order)
+        // until there's an actual race to rank.
+        if (!raceState.startTime) return 0;
         if (a.rankMs == null && b.rankMs == null) return a.name.localeCompare(b.name);
         if (a.rankMs == null) return 1;
         if (b.rankMs == null) return -1;
@@ -1692,6 +1705,7 @@
     nameSpan.className = 'boat-name-text';
 
     const tdName = document.createElement('td');
+    tdName.className = 'boat-name-col';
     tdName.append(selfBtn, nameSpan);
 
     const sailNumberInput = document.createElement('input');
@@ -2041,20 +2055,28 @@
     const vsSelfMap = computeVsSelf(boats, raceState.selfBoatId);
 
     boats.forEach((b) => {
-      let row = rows.get(b.boatId);
-      if (!row) {
-        row = buildRow(b.boatId);
-        rows.set(b.boatId, row);
+      if (!rows.get(b.boatId)) {
+        rows.set(b.boatId, buildRow(b.boatId));
       }
-      // Moving an already-attached node to its sorted position keeps it
-      // intact (focus, in-progress edits) rather than recreating it — but
-      // the move itself still resets a text cursor and closes an open
-      // <select>, so skip it entirely while the user has something in this
-      // row focused. It'll snap to its correct position as soon as they're
-      // done (next render after focus moves away).
-      if (!row.tr.contains(document.activeElement)) {
-        boatsBody.appendChild(row.tr);
-      }
+    });
+    // Moving already-attached nodes to their sorted position keeps them
+    // intact (focus, in-progress edits) rather than recreating them — but
+    // the move itself still resets a text cursor and closes an open
+    // <select>, so the whole reorder pass is skipped while the user has
+    // anything in ANY row focused, not just the row that would move.
+    // Reordering around a skipped row by moving everyone else in sequence
+    // can still shuffle it to a different spot as a side effect of those
+    // other moves, which is exactly the "keep self on top" guarantee this
+    // was supposed to preserve — so it's all-or-nothing instead. It'll
+    // snap to the fully correct order on the next render once focus moves
+    // away.
+    const anyRowFocused = boats.some((b) => rows.get(b.boatId).tr.contains(document.activeElement));
+    if (!anyRowFocused) {
+      boats.forEach((b) => boatsBody.appendChild(rows.get(b.boatId).tr));
+    }
+
+    boats.forEach((b) => {
+      const row = rows.get(b.boatId);
 
       row.tr.classList.toggle('finished', !!b.finishTime);
       row.tr.classList.toggle('dnf', !!b.dnf);
