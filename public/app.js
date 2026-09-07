@@ -11,8 +11,10 @@
   let suggestionItems = []; // currently-shown filtered suggestions
   let suggestionActiveIndex = -1;
   let handicapBoats = [];
-  let handicapVersion = 0; // bumped each successful VET-register load
+  let handicapVersion = 0; // bumped each successful VET-register (or KTK) load
   let vetEnabled = false; // plugin config setting (Server -> Plugin Config), read-only here; off by default
+  let ktkBoats = []; // [{name, vets: [{label, value}]}] from KTK's KLR register — same shape as handicapBoats
+  let ktkEnabled = false; // plugin config setting, same pattern as vetEnabled
   let raceImportEnabled = false; // plugin config setting, same pattern as vetEnabled
   let importEventId = null; // Manage2Sail event id from the last successful "Find Classes" lookup
   let importClasses = []; // [{id, name}] from that same lookup
@@ -60,6 +62,9 @@
   const vetStatusText = document.getElementById('vetStatusText');
   const vetRefreshBtn = document.getElementById('vetRefreshBtn');
   const vetAlternativesTh = document.getElementById('vetAlternativesTh');
+  const ktkStatusLine = document.getElementById('ktkStatusLine');
+  const ktkStatusText = document.getElementById('ktkStatusText');
+  const ktkRefreshBtn = document.getElementById('ktkRefreshBtn');
   const addBoatRow = document.getElementById('addBoatRow');
   const addBoatName = document.getElementById('addBoatName');
   const addBoatBtn = document.getElementById('addBoatBtn');
@@ -225,6 +230,11 @@
     vetStatusText.classList.toggle('error', !!isError);
   }
 
+  function setKtkStatus(msg, isError) {
+    ktkStatusText.textContent = msg || '';
+    ktkStatusText.classList.toggle('error', !!isError);
+  }
+
   // Vessels are only used as autocomplete suggestions when adding a boat
   // (name + MMSI hint) — a race's boat list is otherwise entered explicitly,
   // not auto-populated from AIS.
@@ -264,6 +274,7 @@
       }
     }
     if (vetEnabled) handicapBoats.forEach((b) => upsert(b.name, ''));
+    if (ktkEnabled) ktkBoats.forEach((b) => upsert(b.name, ''));
     boatRegistry.forEach((b) => upsert(b.name, b.mmsi));
     vesselSuggestions.forEach((v) => upsert(v.name, v.mmsi));
     nameSuggestionPool = Array.from(byName.values());
@@ -362,10 +373,23 @@
     }
     // When disabled, every trace of VET is removed from the webapp rather
     // than shown as a disabled/placeholder state — the status line (register
-    // status text + refresh link) and the whole "VET alternatives" table
-    // column disappear entirely.
+    // status text + refresh link) disappears entirely. The "Handicap
+    // alternatives" column is shared with KTK, so it's only hidden once
+    // both are off — see loadKtkEnabled.
     vetStatusLine.hidden = !vetEnabled;
-    vetAlternativesTh.hidden = !vetEnabled;
+    vetAlternativesTh.hidden = !vetEnabled && !ktkEnabled;
+  }
+
+  // Same pattern as loadVetEnabled, for KTK's KLR register.
+  async function loadKtkEnabled() {
+    try {
+      const data = await fetchJSON(`${API}/ktk-enabled`);
+      ktkEnabled = data.enabled === true;
+    } catch (e) {
+      ktkEnabled = false;
+    }
+    ktkStatusLine.hidden = !ktkEnabled;
+    vetAlternativesTh.hidden = !vetEnabled && !ktkEnabled;
   }
 
   // Same pattern as loadVetEnabled — when disabled, the whole import
@@ -403,6 +427,20 @@
       setVetStatus(`VET register: ${handicapBoats.length} boats loaded.`);
     } catch (e) {
       setVetStatus('Could not load VET register: ' + e.message, true);
+    }
+  }
+
+  async function loadKtkRegister(force) {
+    if (!ktkEnabled) return;
+    try {
+      setKtkStatus('Loading KTK register…');
+      const data = await fetchJSON(`${API}/ktk-source${force ? '?refresh=true' : ''}`);
+      ktkBoats = data.boats || [];
+      handicapVersion++;
+      rebuildNameSuggestionPool();
+      setKtkStatus(`KTK register: ${ktkBoats.length} boats loaded.`);
+    } catch (e) {
+      setKtkStatus('Could not load KTK register: ' + e.message, true);
     }
   }
 
@@ -1768,7 +1806,7 @@
     vetBadge.className = 'vet-badge';
     const tdVet = document.createElement('td');
     tdVet.className = 'vet-cell';
-    tdVet.hidden = !vetEnabled;
+    tdVet.hidden = !vetEnabled && !ktkEnabled;
     tdVet.append(vetSelect, vetBadge);
 
     // A boat's own start time, for a staggered/pursuit start or to correct
@@ -1923,28 +1961,43 @@
     };
   }
 
-  // Rebuilds a row's VET-alternatives <select> from the current register —
-  // only called when the register itself (re)loads, not every render tick,
-  // so an open dropdown or mid-pick isn't disrupted every second. Never
-  // called at all while vetEnabled is false (see the call site) — the
-  // "VET alternatives" column is hidden entirely in that case.
+  // Rebuilds a row's handicap-alternatives <select> from the current
+  // register(s) — only called when a register itself (re)loads, not every
+  // render tick, so an open dropdown or mid-pick isn't disrupted every
+  // second. Never called at all while both vetEnabled and ktkEnabled are
+  // false (see the call site) — the "Handicap alternatives" column is
+  // hidden entirely in that case. Merges VET-tall and KTK when both are
+  // enabled and a boat matches both, rather than picking one over the
+  // other.
   function refreshVetAlternatives(row, boatName) {
-    const entry = handicapBoats.find((h) => h.name.toLowerCase() === boatName.trim().toLowerCase());
+    const name = boatName.trim().toLowerCase();
+    const vetEntry = vetEnabled ? handicapBoats.find((h) => h.name.toLowerCase() === name) : null;
+    const ktkEntry = ktkEnabled ? ktkBoats.find((h) => h.name.toLowerCase() === name) : null;
+    const bothEnabled = vetEnabled && ktkEnabled;
+    const options = [];
+    if (vetEntry) {
+      vetEntry.vets.forEach((v) => options.push({ value: v.value, text: `${bothEnabled ? 'VET ' : ''}${v.label}: ${v.value}` }));
+    }
+    if (ktkEntry) {
+      ktkEntry.vets.forEach((v) =>
+        options.push({ value: v.value, text: `${bothEnabled ? 'KTK ' : ''}${v.label}: ${v.raw} → ${v.value}` })
+      );
+    }
     row.vetSelect.innerHTML = '';
     const placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = entry ? 'Pick VET…' : 'No VET match';
+    placeholder.textContent = options.length ? 'Pick…' : 'No match';
     row.vetSelect.appendChild(placeholder);
-    row.vetSelect.disabled = !entry;
-    if (entry) {
-      entry.vets.forEach((v) => {
-        const opt = document.createElement('option');
-        opt.value = String(v.value);
-        opt.textContent = `${v.label}: ${v.value}`;
-        row.vetSelect.appendChild(opt);
-      });
-      const notValid = /ikke/i.test(entry.validity || '');
-      row.vetBadge.textContent = entry.validity ? (notValid ? '⚠ ' + entry.validity : entry.validity) : '';
+    row.vetSelect.disabled = !options.length;
+    options.forEach((o) => {
+      const opt = document.createElement('option');
+      opt.value = String(o.value);
+      opt.textContent = o.text;
+      row.vetSelect.appendChild(opt);
+    });
+    if (vetEntry) {
+      const notValid = /ikke/i.test(vetEntry.validity || '');
+      row.vetBadge.textContent = vetEntry.validity ? (notValid ? '⚠ ' + vetEntry.validity : vetEntry.validity) : '';
       row.vetBadge.classList.toggle('warn', notValid);
     } else {
       row.vetBadge.textContent = '';
@@ -2093,7 +2146,7 @@
       if (document.activeElement !== row.tcfInput) {
         row.tcfInput.value = b.tcf;
       }
-      if (vetEnabled && row.vetHandicapVersion !== handicapVersion && document.activeElement !== row.vetSelect) {
+      if ((vetEnabled || ktkEnabled) && row.vetHandicapVersion !== handicapVersion && document.activeElement !== row.vetSelect) {
         refreshVetAlternatives(row, b.name);
         row.vetHandicapVersion = handicapVersion;
       }
@@ -2236,6 +2289,7 @@
   scheduleCallOffBtn.addEventListener('click', scheduleCallOff);
   cancelCallOffBtn.addEventListener('click', cancelCallOffSchedule);
   vetRefreshBtn.addEventListener('click', () => loadHandicapRegister(true));
+  ktkRefreshBtn.addEventListener('click', () => loadKtkRegister(true));
   addBoatBtn.addEventListener('click', () => {
     hideSuggestions();
     addBoat();
@@ -2359,11 +2413,13 @@
 
   async function init() {
     await loadVetEnabled();
+    await loadKtkEnabled();
     await loadRaceImportEnabled();
     await Promise.all([
       loadVessels(),
       loadBoatRegistry(),
       loadHandicapRegister(false),
+      loadKtkRegister(false),
       loadWaypoints(),
       loadRacesList(),
       refreshSelfNav()

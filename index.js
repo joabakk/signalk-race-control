@@ -5,6 +5,16 @@ const ExcelJS = require('exceljs');
 const DEFAULT_HANDICAP_SOURCE_PAGE = 'https://ssca.no/aktiviteter/vet-tall';
 const HANDICAP_CACHE_TTL_MS = 60 * 60 * 1000;
 
+// KTK (Klassisk Treseiler Klubb) publishes its own handicap register, KLR,
+// as an HTML table embedded directly in a Blogger post tagged "KLR" — the
+// label listing page below always shows the most recent post first (with
+// its full content, not just an excerpt), so it doubles as "whichever
+// season's numbers are current" without needing to track individual post
+// URLs across years, the same way the VET-tall page above always links to
+// the current sheet. A specific post URL works too, since it has the exact
+// same table.
+const DEFAULT_KTK_SOURCE_PAGE = 'http://klassisktreseilerklubb.blogspot.com/search/label/KLR';
+
 function parseCsvText(text) {
   const rows = [];
   let row = [];
@@ -96,6 +106,51 @@ function parseHandicapSheet(csvText) {
       vets
     });
   }
+  return boats;
+}
+
+function stripHtmlToText(html) {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .trim();
+}
+
+// KTK's KLR table has just two columns (boat name, KLR number) and no label
+// text distinguishing multiple entries for the same boat (unlike VET-tall's
+// named sail configurations) — a boat with more than one row just gets
+// numbered alternatives. The published KLR number isn't a TCF directly:
+// corrected time = elapsed × (KLR / 100), so that division happens here,
+// once, rather than at every point KLR values get used downstream — same
+// as VET-tall's own numbers, which likewise need no conversion once parsed.
+function parseKtkHtml(html) {
+  const tableMatch = html.match(/<table[\s\S]*?<\/table>/i);
+  if (!tableMatch) {
+    throw new Error('Could not find the KLR table on the page');
+  }
+  const rowMatches = tableMatch[0].match(/<tr[\s\S]*?<\/tr>/gi) || [];
+  const boatsByKey = new Map();
+  rowMatches.forEach((rowHtml) => {
+    const cellMatches = rowHtml.match(/<td[\s\S]*?<\/td>/gi) || [];
+    if (cellMatches.length < 2) return;
+    const name = stripHtmlToText(cellMatches[0]);
+    const rawValue = parseNorwegianNumber(stripHtmlToText(cellMatches[1]));
+    if (!name || rawValue == null || rawValue <= 0) return;
+    const key = name.toLowerCase();
+    const existing = boatsByKey.get(key) || { name, vets: [] };
+    // raw is the published KLR number itself (e.g. 166) — kept alongside
+    // the converted TCF (1.66) so the dropdown can show the number sailors
+    // actually recognize, not just the already-divided multiplier.
+    existing.vets.push({ label: '', value: Math.round((rawValue / 100) * 1000) / 1000, raw: rawValue });
+    boatsByKey.set(key, existing);
+  });
+  const boats = Array.from(boatsByKey.values());
+  boats.forEach((b) => {
+    b.vets.forEach((v, i) => {
+      v.label = b.vets.length > 1 ? `KLR ${i + 1}` : 'KLR';
+    });
+  });
   return boats;
 }
 
@@ -358,6 +413,10 @@ function buildOfflineTimerHtml(race, defaultTcf, vetOptions) {
     vetEnabled: !!vetOptions.vetEnabled,
     handicapCsvUrl: vetOptions.handicapCsvUrl || null,
     handicapBoats: vetOptions.handicapBoats || [],
+    // KTK has no live-refresh counterpart offline (see the route handler) —
+    // just this one-time snapshot from export time.
+    ktkEnabled: !!vetOptions.ktkEnabled,
+    ktkBoats: vetOptions.ktkBoats || [],
     boats: Object.values(race.boats).map((b) => ({
       id: b.id,
       name: b.name,
@@ -382,6 +441,12 @@ function buildOfflineTimerHtml(race, defaultTcf, vetOptions) {
   // title, the iOS home-screen app title) — escaped the normal way for that
   // context, distinct from the JSON escaping above.
   const escapedRaceName = String(race.name || 'Race').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const handicapNotes = [];
+  if (vetOptions.vetEnabled) handicapNotes.push('VET-tall handicaps can be refreshed here directly from the internet (see below)');
+  if (vetOptions.ktkEnabled) handicapNotes.push("KTK's KLR numbers are included as of download time, but can't be refreshed offline (no direct internet fetch support)");
+  const handicapNote = handicapNotes.length
+    ? handicapNotes.join(', and ') + '. Importing a whole fleet from Manage2Sail still needs the live plugin server, though.'
+    : 'TCF is entered by hand.';
 
   return `<!doctype html>
 <html lang="en">
@@ -468,7 +533,7 @@ tbody tr.dnf td { color: var(--muted); }
   <p class="offline-note">Standalone backup — works with no server connection to this plugin.
     Everything you do here is saved in this browser only (reopen this same downloaded file
     to continue). Boat names/positions from AIS and the course/chart aren't available
-    offline. ${vetOptions.vetEnabled ? 'VET-tall handicaps can be refreshed here directly from the internet (see below) — importing a whole fleet from Manage2Sail still needs the live plugin server, though.' : 'TCF is entered by hand.'}</p>
+    offline. ${handicapNote}</p>
   <h2 id="raceName"></h2>
   <div id="clock" class="clock">00:00:00</div>
   <div class="controls">
@@ -503,7 +568,7 @@ tbody tr.dnf td { color: var(--muted); }
           <th class="boat-name-col">Boat</th>
           <th>Sail #</th>
           <th>TCF</th>
-          <th id="vetAlternativesTh" hidden>VET alternatives</th>
+          <th id="vetAlternativesTh" hidden>Handicap alternatives</th>
           <th>Start time</th>
           <th>Elapsed</th>
           <th>Corrected</th>
@@ -548,8 +613,12 @@ tbody tr.dnf td { color: var(--muted); }
     race.vetEnabled = !!seed.vetEnabled;
     race.handicapCsvUrl = seed.handicapCsvUrl || null;
     if (!Array.isArray(race.handicapBoats)) race.handicapBoats = seed.handicapBoats || [];
+    // KTK has no live refresh offline (see the seed's own comment above), so
+    // its snapshot only ever comes from the seed — always take it fresh.
+    race.ktkEnabled = !!seed.ktkEnabled;
+    race.ktkBoats = seed.ktkBoats || [];
   } catch (e) {
-    race = { name: 'Race', startTime: null, stopTime: null, selfBoatId: null, multiDay: false, boats: [], defaultTcf: 1.0, vetEnabled: false, handicapCsvUrl: null, handicapBoats: [] };
+    race = { name: 'Race', startTime: null, stopTime: null, selfBoatId: null, multiDay: false, boats: [], defaultTcf: 1.0, vetEnabled: false, handicapCsvUrl: null, handicapBoats: [], ktkEnabled: false, ktkBoats: [] };
   }
 
   function save() {
@@ -689,7 +758,7 @@ tbody tr.dnf td { color: var(--muted); }
   function rebuildAddBoatSuggestions() {
     addBoatSuggestions.innerHTML = '';
     var seen = {};
-    race.handicapBoats.forEach(function (b) {
+    race.handicapBoats.concat(race.ktkBoats).forEach(function (b) {
       var key = b.name.toLowerCase();
       if (seen[key]) return;
       seen[key] = true;
@@ -724,25 +793,41 @@ tbody tr.dnf td { color: var(--muted); }
       });
   }
 
-  // Rebuilds a row's VET-alternatives <select> from the current register —
-  // only called when the register itself (re)loads, not every render tick.
+  // Rebuilds a row's alternatives <select> from the current register(s) —
+  // only called when a register itself (re)loads, not every render tick.
+  // Merges VET-tall and KTK when both are enabled and a boat matches both,
+  // rather than picking one over the other.
   function refreshVetAlternatives(row, boatName) {
-    var entry = race.handicapBoats.find(function (h) { return h.name.toLowerCase() === boatName.trim().toLowerCase(); });
+    var name = boatName.trim().toLowerCase();
+    var vetEntry = race.vetEnabled ? race.handicapBoats.find(function (h) { return h.name.toLowerCase() === name; }) : null;
+    var ktkEntry = race.ktkEnabled ? race.ktkBoats.find(function (h) { return h.name.toLowerCase() === name; }) : null;
+    var bothEnabled = race.vetEnabled && race.ktkEnabled;
+    var options = [];
+    if (vetEntry) {
+      vetEntry.vets.forEach(function (v) {
+        options.push({ value: v.value, text: (bothEnabled ? 'VET ' : '') + v.label + ': ' + v.value });
+      });
+    }
+    if (ktkEntry) {
+      ktkEntry.vets.forEach(function (v) {
+        options.push({ value: v.value, text: (bothEnabled ? 'KTK ' : '') + v.label + ': ' + v.raw + ' → ' + v.value });
+      });
+    }
     row.vetSelect.innerHTML = '';
     var placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = entry ? 'Pick VET…' : 'No VET match';
+    placeholder.textContent = options.length ? 'Pick…' : 'No match';
     row.vetSelect.appendChild(placeholder);
-    row.vetSelect.disabled = !entry;
-    if (entry) {
-      entry.vets.forEach(function (v) {
-        var opt = document.createElement('option');
-        opt.value = String(v.value);
-        opt.textContent = v.label + ': ' + v.value;
-        row.vetSelect.appendChild(opt);
-      });
-      var notValid = /ikke/i.test(entry.validity || '');
-      row.vetBadge.textContent = entry.validity ? (notValid ? '⚠ ' + entry.validity : entry.validity) : '';
+    row.vetSelect.disabled = !options.length;
+    options.forEach(function (o) {
+      var opt = document.createElement('option');
+      opt.value = String(o.value);
+      opt.textContent = o.text;
+      row.vetSelect.appendChild(opt);
+    });
+    if (vetEntry) {
+      var notValid = /ikke/i.test(vetEntry.validity || '');
+      row.vetBadge.textContent = vetEntry.validity ? (notValid ? '⚠ ' + vetEntry.validity : vetEntry.validity) : '';
       row.vetBadge.classList.toggle('warn', notValid);
     } else {
       row.vetBadge.textContent = '';
@@ -1002,7 +1087,7 @@ tbody tr.dnf td { color: var(--muted); }
     vetBadge.className = 'vet-badge';
     var tdVet = document.createElement('td');
     tdVet.className = 'vet-cell';
-    tdVet.hidden = !race.vetEnabled;
+    tdVet.hidden = !race.vetEnabled && !race.ktkEnabled;
     tdVet.append(vetSelect, vetBadge);
 
     var startTimeInput = document.createElement('input');
@@ -1189,7 +1274,7 @@ tbody tr.dnf td { color: var(--muted); }
       row.selfBtn.classList.toggle('active', isSelf);
       if (document.activeElement !== row.sailNumberInput) row.sailNumberInput.value = b.sailNumber || '';
       if (document.activeElement !== row.tcfInput) row.tcfInput.value = b.tcf;
-      if (race.vetEnabled) {
+      if (race.vetEnabled || race.ktkEnabled) {
         if (row.vetHandicapVersion !== handicapVersion && document.activeElement !== row.vetSelect) {
           refreshVetAlternatives(row, b.name);
           row.vetHandicapVersion = handicapVersion;
@@ -1289,8 +1374,9 @@ tbody tr.dnf td { color: var(--muted); }
   });
 
   vetStatusLine.hidden = !race.vetEnabled;
-  vetAlternativesTh.hidden = !race.vetEnabled;
+  vetAlternativesTh.hidden = !race.vetEnabled && !race.ktkEnabled;
   vetRefreshBtn.addEventListener('click', function () { loadHandicapRegister(true); });
+  if (race.ktkEnabled) rebuildAddBoatSuggestions();
   if (race.vetEnabled) {
     rebuildAddBoatSuggestions();
     if (race.handicapBoats.length) {
@@ -1336,6 +1422,18 @@ module.exports = function (app) {
           'Use the VET-tall register for autocomplete and per-boat handicap alternatives. When off, every boat is treated as outside VET: TCF is remembered per boat name across races instead.',
         default: false
       },
+      ktkSourceUrl: {
+        type: 'string',
+        title:
+          "KTK page to fetch the current season's KLR numbers from — either the label listing (whose most recent post is used) or a specific post directly",
+        default: DEFAULT_KTK_SOURCE_PAGE
+      },
+      ktkEnabled: {
+        type: 'boolean',
+        title:
+          "Use KTK's KLR register for autocomplete and per-boat handicap alternatives too, alongside VET-tall if that's also on — a boat listed in both shows alternatives from both. Corrected time from a KLR number is elapsed × (KLR / 100).",
+        default: false
+      },
       raceImportEnabled: {
         type: 'boolean',
         title:
@@ -1362,6 +1460,7 @@ module.exports = function (app) {
   const scheduleTimers = new Map(); // raceId -> Timeout, for scheduledStart
   const callOffTimers = new Map(); // raceId -> Timeout, for scheduledCallOff
   let handicapCache = { fetchedAt: 0, boats: [], sourceUrl: null, csvUrl: null };
+  let ktkCache = { fetchedAt: 0, boats: [], sourceUrl: null };
 
   function loadState() {
     try {
@@ -1405,20 +1504,29 @@ module.exports = function (app) {
     return !!(plugin.options && plugin.options.vetEnabled === true);
   }
 
+  // Same pattern as vetEnabled, for KTK's KLR register.
+  function isKtkEnabled() {
+    return !!(plugin.options && plugin.options.ktkEnabled === true);
+  }
+
   // Plugin config setting, same pattern as vetEnabled — off by default, not
   // per-race, not writable from the webapp itself.
   function isRaceImportEnabled() {
     return !!(plugin.options && plugin.options.raceImportEnabled === true);
   }
 
-  // A boat only counts as "in VET" for registry-TCF purposes while the
-  // config setting has VET enabled and the register (whatever's currently
-  // cached) actually has a matching name — disabling VET makes every boat
-  // "outside VET" for this purpose too, per the setting's whole point.
-  function isVetMatch(name) {
-    if (!isVetEnabled()) return false;
+  // A boat only counts as "in a handicap register" for registry-TCF
+  // purposes while that register is enabled and (whatever's currently
+  // cached of) it actually has a matching name — disabling a register makes
+  // every boat "outside" it for this purpose too, per the setting's whole
+  // point. Checks both VET-tall and KTK, since a boat matched by either one
+  // should be picked fresh from its own dropdown rather than carrying over
+  // a remembered TCF.
+  function isHandicapRegisterMatch(name) {
     const n = (name || '').trim().toLowerCase();
-    return handicapCache.boats.some((b) => b.name.toLowerCase() === n);
+    if (isVetEnabled() && handicapCache.boats.some((b) => b.name.toLowerCase() === n)) return true;
+    if (isKtkEnabled() && ktkCache.boats.some((b) => b.name.toLowerCase() === n)) return true;
+    return false;
   }
 
   function saveState() {
@@ -1799,6 +1907,22 @@ module.exports = function (app) {
     return handicapCache;
   }
 
+  async function fetchKtkBoats(forceRefresh) {
+    const sourceUrl = (plugin.options && plugin.options.ktkSourceUrl) || DEFAULT_KTK_SOURCE_PAGE;
+    const age = Date.now() - ktkCache.fetchedAt;
+    if (!forceRefresh && ktkCache.sourceUrl === sourceUrl && age < HANDICAP_CACHE_TTL_MS) {
+      return ktkCache;
+    }
+    const res = await fetch(sourceUrl);
+    if (!res.ok) {
+      throw new Error(`KTK page returned HTTP ${res.status}`);
+    }
+    const html = await res.text();
+    const boats = parseKtkHtml(html);
+    ktkCache = { fetchedAt: Date.now(), boats, sourceUrl };
+    return ktkCache;
+  }
+
   async function fetchManage2SailClasses(eventUrl) {
     const res = await fetch(eventUrl);
     if (!res.ok) {
@@ -1996,10 +2120,26 @@ module.exports = function (app) {
           }
         }
       }
+      // KTK's page has no CORS support (unlike the VET-tall CSV export), so
+      // unlike handicapBoats above this is a one-time snapshot only — the
+      // offline page can't refresh it live itself. Still seeded in, since a
+      // snapshot from export time is better than nothing.
+      let ktkBoats = [];
+      if (isKtkEnabled()) {
+        try {
+          const data = await fetchKtkBoats();
+          ktkBoats = data.boats;
+        } catch (e) {
+          // Leave ktkBoats empty — same best-effort spirit as the rest of
+          // this route.
+        }
+      }
       const html = buildOfflineTimerHtml(race, defaultTcf, {
         vetEnabled: isVetEnabled(),
         handicapCsvUrl,
-        handicapBoats
+        handicapBoats,
+        ktkEnabled: isKtkEnabled(),
+        ktkBoats
       });
       const safeName = (race.name || 'race').replace(/[^a-z0-9\-_]+/gi, '_').slice(0, 60) || 'race';
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -2233,11 +2373,12 @@ module.exports = function (app) {
       const sailNumber = givenSailNumber || (registryEntry && registryEntry.sailNumber) || null;
       if (sailNumber) upsertBoatRegistry(name, { sailNumber });
       const defaultTcf = (plugin.options && plugin.options.defaultTcf) || 1.0;
-      // A remembered TCF only applies to boats outside VET — a VET-matched
-      // boat should be picked fresh from the register's own dropdown rather
-      // than silently carrying over a number from wherever it last raced.
+      // A remembered TCF only applies to boats outside every enabled
+      // register — a matched boat should be picked fresh from the
+      // register's own dropdown rather than silently carrying over a
+      // number from wherever it last raced.
       let tcf = defaultTcf;
-      if (!isVetMatch(name) && registryEntry && registryEntry.tcf != null) {
+      if (!isHandicapRegisterMatch(name) && registryEntry && registryEntry.tcf != null) {
         tcf = registryEntry.tcf;
       }
       const boat = {
@@ -2413,6 +2554,11 @@ module.exports = function (app) {
       res.json({ enabled: isVetEnabled() });
     });
 
+    // Same pattern as vet-enabled, for KTK's KLR register.
+    router.get('/ktk-enabled', (req, res) => {
+      res.json({ enabled: isKtkEnabled() });
+    });
+
     // Lets the course editor offer existing SignalK waypoints (e.g. ones
     // already placed on a chart plotter) as start/mark/finish positions,
     // instead of only typing lat/lon by hand. Best-effort, same spirit as
@@ -2449,9 +2595,10 @@ module.exports = function (app) {
         return res.status(400).json({ error: 'tcf must be a positive number' });
       }
       boat.tcf = tcf;
-      // Remembered across races only for boats outside VET — see the note
-      // on upsertBoatRegistry/isVetMatch above.
-      if (!isVetMatch(boat.name)) upsertBoatRegistry(boat.name, { tcf });
+      // Remembered across races only for boats outside every enabled
+      // register — see the note on upsertBoatRegistry/isHandicapRegisterMatch
+      // above.
+      if (!isHandicapRegisterMatch(boat.name)) upsertBoatRegistry(boat.name, { tcf });
       saveState();
       res.json(boat);
     });
@@ -2463,6 +2610,16 @@ module.exports = function (app) {
         res.json(data);
       } catch (e) {
         res.status(502).json({ error: 'Could not load handicap register: ' + e.message });
+      }
+    });
+
+    router.get('/ktk-source', async (req, res) => {
+      try {
+        const force = req.query.refresh === 'true' || req.query.refresh === '1';
+        const data = await fetchKtkBoats(force);
+        res.json(data);
+      } catch (e) {
+        res.status(502).json({ error: 'Could not load KTK register: ' + e.message });
       }
     });
 

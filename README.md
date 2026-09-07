@@ -49,12 +49,21 @@ and a live projected finishing order — during and after the race.
   default** — turn it on in the plugin's settings (`vetEnabled`) for clubs that
   actually race under VET-tall; see **Cross-race TCF memory** below for what happens
   to handicaps while it's off.
-- **Cross-race TCF memory for boats outside VET** — whenever a boat isn't matched in
-  the VET register (or the register is disabled altogether), the TCF you set for it by
-  hand is remembered by boat name and applied automatically the next time a boat with
-  that name is added to any race. A boat that *is* VET-matched never has its TCF
-  carried over this way — it always starts from the default until you pick a VET
-  alternative or edit it again.
+- **KTK import** — the same idea as VET-tall, for [Klassisk Treseiler
+  Klubb](http://klassisktreseilerklubb.blogspot.com/)'s (KTK) own KLR handicap
+  register, published each season as a table in a blog post — this plugin always
+  reads whichever post is most recent, so it tracks the current season without
+  needing an update. A KLR number isn't a TCF directly: corrected time is elapsed ×
+  (KLR / 100), so that conversion happens automatically. Off by default — turn it on
+  in the plugin's settings (`ktkEnabled`) for clubs that race under KLR. If a boat is
+  listed in **both** VET-tall and KTK, the dropdown shows alternatives from both
+  (labeled by which is which), rather than picking one register over the other.
+- **Cross-race TCF memory for boats outside every register** — whenever a boat isn't
+  matched in VET-tall or KTK (or both are disabled), the TCF you set for it by hand is
+  remembered by boat name and applied automatically the next time a boat with that
+  name is added to any race. A boat matched in either register never has its TCF
+  carried over this way — it always starts from the default until you pick an
+  alternative from the dropdown or edit it again.
 - **MMSI and sail number, remembered across races** — set once per boat (MMSI can
   also be picked up automatically from a live AIS/self vessel with a matching name),
   both are remembered in a small cross-race registry: add a boat with the same name
@@ -164,7 +173,10 @@ and a live projected finishing order — during and after the race.
   download time and a **Refresh VET register** link lets the offline page re-fetch the
   current sheet straight from Google Sheets (no plugin server needed for that — just
   whatever internet connection the browser has), with the same alternatives dropdown
-  and autocomplete as the main webapp. AIS boat names/positions, the course/chart, and
+  and autocomplete as the main webapp. If KTK is enabled too, its KLR numbers are
+  seeded in the same way, but — since KTK's own page doesn't allow that kind of direct
+  browser fetch — only as a snapshot from download time, with no offline refresh
+  equivalent. AIS boat names/positions, the course/chart, and
   importing a fleet from Manage2Sail still need the live server (Manage2Sail's own API
   doesn't allow browser-side fetches at all) — TCF is entered by hand for anything the
   VET register doesn't cover. Also has its own "Download results as CSV" button.
@@ -236,11 +248,14 @@ finish time/rank for boats still racing, when the plugin has enough to estimate 
   tracks for a fresh run.
 - The VET-tall source page can be overridden in the plugin's settings
   (`handicapSourceUrl`) — point it at a specific year's Google Sheet link directly to
-  skip the SSCA page lookup, e.g. if a club uses its own register.
-- Whether the VET-tall register is used at all (`vetEnabled`, off by default) is also a plugin
-  setting, not a per-race or webapp-side option — change it under
-  **Server → Plugin Config → Race Control** and restart the plugin (the server does
-  this automatically on save) for the webapp to pick it up.
+  skip the SSCA page lookup, e.g. if a club uses its own register. KTK's source page
+  can likewise be overridden (`ktkSourceUrl`) — point it at a specific post directly to
+  skip the label-listing lookup.
+- Whether the VET-tall register is used at all (`vetEnabled`, off by default) is also a
+  plugin setting, not a per-race or webapp-side option — same for KTK's KLR register
+  (`ktkEnabled`) — change either under **Server → Plugin Config → Race Control** and
+  restart the plugin (the server does this automatically on save) for the webapp to
+  pick it up.
 - The mark-rounding radius used for the estimated finish time and remaining-distance
   calculations (`markRoundingRadiusM`, 100m by default) is also a plugin setting —
   loosen it for a fleet with noisier AIS tracks, or tighten it if marks sit close
