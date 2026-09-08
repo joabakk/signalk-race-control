@@ -359,30 +359,11 @@ function validateLine(line) {
   return [a, b];
 }
 
-// HH:MM:SS for a duration, or '' when there's nothing to show — matches the
-// webapp's fmtDuration, used for the Excel export's Elapsed/Corrected columns.
-function formatDurationHms(ms) {
-  if (ms == null || ms < 0 || !isFinite(ms)) return '';
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
-}
-
 // Renders an absolute instant as the wall-clock time it was in the
 // exporting browser's own timezone (tzOffsetMinutes = that browser's
 // Date.prototype.getTimezoneOffset()) rather than the server's timezone,
 // which may well be different — the server can be headless/UTC while the
 // person opening the spreadsheet is reading it in their own local time.
-function formatLocalTime(utcMs, tzOffsetMinutes) {
-  if (utcMs == null) return '';
-  const shifted = new Date(utcMs - tzOffsetMinutes * 60000);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}`;
-}
-
 function formatLocalDateTime(utcMs, tzOffsetMinutes) {
   if (utcMs == null) return '';
   const shifted = new Date(utcMs - tzOffsetMinutes * 60000);
@@ -2091,11 +2072,7 @@ module.exports = function (app) {
       const tz = isFinite(tzParsed) ? tzParsed : new Date().getTimezoneOffset();
 
       const ranked = rankedBoatList(race);
-      // A multi-day race's finish/start times can land on different
-      // calendar days, so the date is included alongside the time —
-      // otherwise just the time-of-day, matching how they're entered.
-      const fmtWhen = race.multiDay ? formatLocalDateTime : formatLocalTime;
-      const headers = ['Rank', 'Boat', 'Sail Number', 'MMSI', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status'];
+      const headers = ['Rank', 'Boat', 'Sail Number', 'MMSI', 'TCF', 'Start Time', 'Finish Time', 'Elapsed', 'Corrected', 'Status'];
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Race Control';
@@ -2123,6 +2100,18 @@ module.exports = function (app) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
       });
 
+      // Real Excel date/time values in Start/Finish (shifted the same way
+      // formatLocalDateTime above does, to display as the exporting
+      // browser's local wall-clock rather than the server's), not just
+      // formatted text — so Elapsed and Corrected can be genuine
+      // formulas referencing those cells instead of numbers baked in at
+      // export time. Recalculates if a start/finish time is corrected
+      // directly in the spreadsheet afterward. Left blank (by leaving
+      // Finish Time blank) for a boat with no finish time — DNF, DNS, or
+      // still racing — rather than showing a snapshot of elapsed-so-far
+      // that would just sit there, wrong, once the file is reopened later.
+      const dateNumFmt = race.multiDay ? 'yyyy-mm-dd hh:mm:ss' : 'hh:mm:ss';
+      const durationNumFmt = '[h]:mm:ss';
       ranked.forEach((r, i) => {
         const status = r.boat.dns
           ? 'DNS'
@@ -2135,21 +2124,28 @@ module.exports = function (app) {
                 : 'Not started';
         const rankLabel = r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : '';
         const start = effectiveStartTime(race, r.boat);
-        sheet.addRow([
+        const startDate = start != null ? new Date(start - tz * 60000) : null;
+        const finishDate = r.boat.finishTime != null ? new Date(r.boat.finishTime - tz * 60000) : null;
+        const rowNum = headerRow.number + 1 + i;
+        const row = sheet.addRow([
           rankLabel,
           r.boat.name,
           r.boat.sailNumber || '',
           r.boat.mmsi || '',
           r.boat.tcf,
-          start ? fmtWhen(start, tz) : '',
-          formatDurationHms(r.elapsedMs),
-          formatDurationHms(r.correctedMs),
-          r.boat.finishTime ? fmtWhen(r.boat.finishTime, tz) : '',
+          startDate,
+          finishDate,
+          { formula: `IF(OR(F${rowNum}="",G${rowNum}=""),"",G${rowNum}-F${rowNum})` },
+          { formula: `IF(H${rowNum}="","",H${rowNum}*E${rowNum})` },
           status
         ]);
+        row.getCell(6).numFmt = dateNumFmt;
+        row.getCell(7).numFmt = dateNumFmt;
+        row.getCell(8).numFmt = durationNumFmt;
+        row.getCell(9).numFmt = durationNumFmt;
       });
 
-      const widths = [7, 24, 12, 12, 8, race.multiDay ? 17 : 12, 12, 12, race.multiDay ? 17 : 12, 12];
+      const widths = [7, 24, 12, 12, 8, race.multiDay ? 17 : 12, race.multiDay ? 17 : 12, 12, 12, 12];
       widths.forEach((w, i) => {
         sheet.getColumn(i + 1).width = w;
       });

@@ -162,10 +162,15 @@ and a live projected finishing order — during and after the race.
   both have finished. With no boat marked self, the column instead compares everyone
   against the current **leader** (tagged accordingly), so it's never just blank.
 - **Export to Excel** — a genuine `.xlsx` snapshot of the current standings (same
-  ranking, same rows as the on-screen table: rank, boat, sail number, MMSI, TCF,
-  start time, elapsed, corrected, finish time, status), with the time columns
-  rendered in your browser's own timezone rather than the server's (and with the
-  date included, for a multi-day race).
+  ranking, same rows as the on-screen table: rank, boat, sail number, MMSI, TCF, start
+  time, finish time, elapsed, corrected, status), with the time columns rendered in
+  your browser's own timezone rather than the server's (and with the date included,
+  for a multi-day race). Start/finish are real date-time cells, and Elapsed/Corrected
+  are live formulas from them (elapsed × TCF), not numbers baked in at export time —
+  correct a start or finish time directly in the spreadsheet afterward and the rest
+  recalculates. Left blank for a boat with no finish time (DNF, DNS, or still racing)
+  rather than a snapshot of elapsed-so-far that would go stale the moment the file is
+  reopened later.
 - **Download Offline Timer** — a single self-contained `.html` file, seeded with the
   current race's boats, TCF, and multi-day setting, that runs the core of race timing
   (start/stop/resume/reset, add/remove boats, edit TCF, individual start times,
