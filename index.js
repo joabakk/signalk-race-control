@@ -1740,9 +1740,13 @@ module.exports = function (app) {
         return { boat, elapsedMs, correctedMs, estimate, roundedMarksCount, rankMs };
       })
       .sort((a, b) => {
-        if (a.rankMs == null && b.rankMs == null) return a.boat.name.localeCompare(b.boat.name);
-        if (a.rankMs == null) return 1;
-        if (b.rankMs == null) return -1;
+        // DNS sits below everyone else, including DNF — it never even
+        // started, so it's not really "in" the race the way a DNF (which
+        // did start) still arguably is.
+        const aTier = a.boat.dns ? 2 : a.rankMs == null ? 1 : 0;
+        const bTier = b.boat.dns ? 2 : b.rankMs == null ? 1 : 0;
+        if (aTier !== bTier) return aTier - bTier;
+        if (aTier !== 0) return a.boat.name.localeCompare(b.boat.name);
         // Among still-racing boats with no AIS-based ETA to fall back on
         // (elapsed-so-far alone says nothing about how much course is
         // left), a boat recorded further around the course — manually or

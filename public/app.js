@@ -1671,6 +1671,12 @@
         const aSelf = a.boatId === raceState.selfBoatId;
         const bSelf = b.boatId === raceState.selfBoatId;
         if (aSelf !== bSelf) return aSelf ? -1 : 1;
+        // DNS sits at the very end regardless of phase — it can be marked
+        // before the race even starts (a known no-show), and never really
+        // "entered" the race the way even a DNF (which did start) still
+        // did.
+        if (a.dns !== b.dns) return a.dns ? 1 : -1;
+        if (a.dns) return a.name.localeCompare(b.name);
         // Before the race actually starts, nobody has a corrected time to
         // rank by anyway — sorting by name (or anything else derived) just
         // reshuffled the rows confusingly every time a boat was added or
@@ -2286,7 +2292,8 @@
         row.finishNowBtn.disabled = !canFinish;
         row.finishClearBtn.disabled = !canFinish || !b.finishTime;
         row.finishDnfBtn.disabled = !canFinish;
-        row.finishDnsBtn.disabled = !canFinish;
+        // DNS (unlike DNF) is meaningful before the race has even started —
+        // it's how a known no-show gets recorded — so it's never disabled.
       }
     });
 
