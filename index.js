@@ -303,6 +303,7 @@ function ensureRaceShape(race) {
   Object.values(race.boats).forEach((b) => {
     if (!b.track) b.track = [];
     if (b.dnf === undefined) b.dnf = false;
+    if (b.dns === undefined) b.dns = false;
     if (b.dnfPosition === undefined) b.dnfPosition = null;
     if (b.startTime === undefined) b.startTime = null;
     if (b.sailNumber === undefined) b.sailNumber = null;
@@ -424,7 +425,8 @@ function buildOfflineTimerHtml(race, defaultTcf, vetOptions) {
       tcf: b.tcf != null ? b.tcf : defaultTcf,
       startTime: b.startTime || null,
       finishTime: b.finishTime || null,
-      dnf: !!b.dnf
+      dnf: !!b.dnf,
+      dns: !!b.dns
     })),
     storageKey: 'raceControlOffline_v1_' + race.id,
     // Lets a re-download know whether it's actually newer than whatever
@@ -638,13 +640,24 @@ tbody tr.dnf td { color: var(--muted); }
   function doStart() {
     race.startTime = Date.now();
     race.stopTime = null;
-    race.boats.forEach(function (b) { b.finishTime = null; b.startTime = null; b.dnf = false; });
+    race.boats.forEach(function (b) { b.finishTime = null; b.startTime = null; b.dnf = false; b.dns = false; });
     save();
   }
   function doStop() {
     race.stopTime = Date.now();
-    race.boats.forEach(function (b) { if (!b.finishTime && !b.dnf) b.dnf = true; });
+    race.boats.forEach(function (b) { if (!b.finishTime && !b.dnf && !b.dns) b.dnf = true; });
     save();
+  }
+  // A race with at least one boat where every boat has either finished or
+  // been marked DNF/DNS has nothing left to time — call it off
+  // automatically rather than leaving the clock running until someone
+  // remembers to.
+  function isRaceComplete() {
+    if (!race.boats.length) return false;
+    return race.boats.every(function (b) { return b.finishTime || b.dnf || b.dns; });
+  }
+  function maybeAutoStop() {
+    if (race.startTime && !race.stopTime && isRaceComplete()) doStop();
   }
   function doResume() {
     if (!race.stopTime) return;
@@ -655,7 +668,7 @@ tbody tr.dnf td { color: var(--muted); }
   function doReset() {
     race.startTime = null;
     race.stopTime = null;
-    race.boats.forEach(function (b) { b.finishTime = null; b.startTime = null; b.dnf = false; });
+    race.boats.forEach(function (b) { b.finishTime = null; b.startTime = null; b.dnf = false; b.dns = false; });
     save();
   }
   function effectiveStart(boat) {
@@ -897,10 +910,10 @@ tbody tr.dnf td { color: var(--muted); }
     return race.boats
       .map(function (boat) {
         var start = effectiveStart(boat);
-        var elapsedMs = !boat.dnf && start && start <= now ? (boat.finishTime || now) - start : null;
+        var elapsedMs = !boat.dnf && !boat.dns && start && start <= now ? (boat.finishTime || now) - start : null;
         var tcf = boat.tcf != null ? boat.tcf : 1.0;
         var correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
-        var rankMs = boat.dnf ? null : correctedMs;
+        var rankMs = boat.dnf || boat.dns ? null : correctedMs;
         return { boat: boat, elapsedMs: elapsedMs, correctedMs: correctedMs, rankMs: rankMs };
       })
       .sort(function (a, b) {
@@ -935,7 +948,7 @@ tbody tr.dnf td { color: var(--muted); }
     if (!self) return map;
     ranked.forEach(function (r) {
       if (r.boat.id === self.boat.id) { map[r.boat.id] = { type: 'self', isLeader: isLeaderFallback }; return; }
-      if (self.boat.dnf) { map[r.boat.id] = { type: 'none' }; return; }
+      if (self.boat.dnf || self.boat.dns) { map[r.boat.id] = { type: 'none' }; return; }
       if (!self.boat.finishTime && r.boat.finishTime) {
         var thresholdElapsedMs = r.correctedMs / (self.boat.tcf || 1);
         map[r.boat.id] = {
@@ -1154,6 +1167,7 @@ tbody tr.dnf td { color: var(--muted); }
           ? dateTimeInputValueToTs(finishTimeInput.value)
           : timeInputValueToTs(finishTimeInput.value);
       }
+      maybeAutoStop();
       save();
       render();
     });
@@ -1165,6 +1179,7 @@ tbody tr.dnf td { color: var(--muted); }
       var boat = findBoat(boatId);
       if (!boat) return;
       boat.finishTime = Date.now();
+      maybeAutoStop();
       save();
       render();
     });
@@ -1187,12 +1202,26 @@ tbody tr.dnf td { color: var(--muted); }
       var boat = findBoat(boatId);
       if (!boat) return;
       boat.dnf = true;
+      maybeAutoStop();
+      save();
+      render();
+    });
+    var finishDnsBtn = document.createElement('button');
+    finishDnsBtn.type = 'button';
+    finishDnsBtn.className = 'finish-dnf-btn';
+    finishDnsBtn.textContent = 'DNS';
+    finishDnsBtn.title = 'Did not start';
+    finishDnsBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.dns = true;
+      maybeAutoStop();
       save();
       render();
     });
     var finishNormalWrap = document.createElement('div');
     finishNormalWrap.className = 'finish-cell';
-    finishNormalWrap.append(finishTimeInput, finishNowBtn, finishClearBtn, finishDnfBtn);
+    finishNormalWrap.append(finishTimeInput, finishNowBtn, finishClearBtn, finishDnfBtn, finishDnsBtn);
 
     var dnfTag = document.createElement('span');
     dnfTag.className = 'dnf-tag';
@@ -1212,8 +1241,26 @@ tbody tr.dnf td { color: var(--muted); }
     dnfWrap.className = 'finish-cell';
     dnfWrap.append(dnfTag, undoDnfBtn);
 
+    var dnsTag = document.createElement('span');
+    dnsTag.className = 'dnf-tag';
+    dnsTag.textContent = 'DNS';
+    var undoDnsBtn = document.createElement('button');
+    undoDnsBtn.type = 'button';
+    undoDnsBtn.className = 'undo-dnf-btn';
+    undoDnsBtn.textContent = 'Undo DNS';
+    undoDnsBtn.addEventListener('click', function () {
+      var boat = findBoat(boatId);
+      if (!boat) return;
+      boat.dns = false;
+      save();
+      render();
+    });
+    var dnsWrap = document.createElement('div');
+    dnsWrap.className = 'finish-cell';
+    dnsWrap.append(dnsTag, undoDnsBtn);
+
     var tdFinish = document.createElement('td');
-    tdFinish.append(finishNormalWrap, dnfWrap);
+    tdFinish.append(finishNormalWrap, dnfWrap, dnsWrap);
 
     var removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -1225,6 +1272,7 @@ tbody tr.dnf td { color: var(--muted); }
       // from the DOM, not just forget about it.
       race.boats = race.boats.filter(function (b) { return b.id !== boatId; });
       if (race.selfBoatId === boatId) race.selfBoatId = null;
+      maybeAutoStop();
       save();
       render();
     });
@@ -1237,7 +1285,7 @@ tbody tr.dnf td { color: var(--muted); }
       vetSelect: vetSelect, vetBadge: vetBadge, vetHandicapVersion: -1,
       startTimeInput: startTimeInput, startNowBtn: startNowBtn, startClearBtn: startClearBtn,
       tdElapsed: tdElapsed, tdCorrected: tdCorrected, tdVsSelf: tdVsSelf,
-      finishNormalWrap: finishNormalWrap, finishTimeInput: finishTimeInput, dnfWrap: dnfWrap
+      finishNormalWrap: finishNormalWrap, finishTimeInput: finishTimeInput, dnfWrap: dnfWrap, dnsWrap: dnsWrap
     };
   }
 
@@ -1267,7 +1315,7 @@ tbody tr.dnf td { color: var(--muted); }
       var row = rows[b.id];
       if (!row) { row = buildRow(b.id); rows[b.id] = row; }
       row.tr.classList.toggle('finished', !!b.finishTime);
-      row.tr.classList.toggle('dnf', !!b.dnf);
+      row.tr.classList.toggle('dnf', !!b.dnf || !!b.dns);
       row.nameSpan.textContent = b.name;
       var isSelf = b.id === race.selfBoatId;
       row.selfBtn.textContent = isSelf ? '★' : '☆';
@@ -1303,8 +1351,9 @@ tbody tr.dnf td { color: var(--muted); }
         row.tdVsSelf.textContent = fmtSigned(vs.gapMs);
         row.tdVsSelf.classList.add(vs.gapMs < 0 ? 'ahead' : 'behind');
       }
-      row.finishNormalWrap.hidden = !!b.dnf;
+      row.finishNormalWrap.hidden = !!b.dnf || !!b.dns;
       row.dnfWrap.hidden = !b.dnf;
+      row.dnsWrap.hidden = !b.dns;
       if (document.activeElement !== row.finishTimeInput) {
         row.finishTimeInput.value = race.multiDay ? tsToDateTimeInputValue(b.finishTime) : tsToTimeInputValue(b.finishTime);
       }
@@ -1348,8 +1397,8 @@ tbody tr.dnf td { color: var(--muted); }
     var fmtWhen = race.multiDay ? tsToDateTimeInputValue : tsToTimeInputValue;
     var rows = [['Rank', 'Boat', 'Sail Number', 'TCF', 'Start Time', 'Elapsed', 'Corrected', 'Finish Time', 'Status']];
     rankedList().forEach(function (r, i) {
-      var status = r.boat.dnf ? 'DNF' : r.boat.finishTime ? 'Finished' : race.startTime ? 'Racing' : 'Not started';
-      var rankLabel = r.boat.dnf ? 'DNF' : r.rankMs != null ? String(i + 1) : '';
+      var status = r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.boat.finishTime ? 'Finished' : race.startTime ? 'Racing' : 'Not started';
+      var rankLabel = r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.rankMs != null ? String(i + 1) : '';
       var start = effectiveStart(r.boat);
       rows.push([
         rankLabel, r.boat.name, r.boat.sailNumber || '', r.boat.tcf, start ? fmtWhen(start) : '', fmtDuration(r.elapsedMs), fmtDuration(r.correctedMs),
@@ -1657,7 +1706,7 @@ module.exports = function (app) {
   // there's a finish line, a live position, and a non-trivial speed.
   function estimateFinish(race, boat) {
     const start = effectiveStartTime(race, boat);
-    if (!start || start > Date.now() || boat.finishTime || boat.dnf || race.stopTime) return null;
+    if (!start || start > Date.now() || boat.finishTime || boat.dnf || boat.dns || race.stopTime) return null;
     if (!race.course || !race.course.finishLine) return null;
     const live = getLivePosition(boat.mmsi);
     if (!live || live.sogMs == null || live.sogMs < 0.25) return null;
@@ -1701,12 +1750,12 @@ module.exports = function (app) {
     return Object.values(race.boats)
       .map((boat) => {
         const start = effectiveStartTime(race, boat);
-        const elapsedMs = !boat.dnf && start && start <= now ? (boat.finishTime || now) - start : null;
+        const elapsedMs = !boat.dnf && !boat.dns && start && start <= now ? (boat.finishTime || now) - start : null;
         const tcf = boat.tcf != null ? boat.tcf : 1.0;
         const correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
         const estimate = estimateFinish(race, boat);
         const roundedMarksCount = countRoundedMarks(race, boat);
-        const rankMs = boat.dnf ? null : boat.finishTime ? correctedMs : estimate ? estimate.estCorrectedMs : correctedMs;
+        const rankMs = boat.dnf || boat.dns ? null : boat.finishTime ? correctedMs : estimate ? estimate.estCorrectedMs : correctedMs;
         return { boat, elapsedMs, correctedMs, estimate, roundedMarksCount, rankMs };
       })
       .sort((a, b) => {
@@ -1789,7 +1838,7 @@ module.exports = function (app) {
     Object.values(state.races).forEach((race) => {
       if (!race.startTime || race.stopTime) return;
       Object.values(race.boats).forEach((boat) => {
-        if (boat.finishTime || boat.dnf || !boat.mmsi) return;
+        if (boat.finishTime || boat.dnf || boat.dns || !boat.mmsi) return;
         const live = getLivePosition(boat.mmsi);
         if (!live) return;
         if (!boat.track) boat.track = [];
@@ -1820,6 +1869,7 @@ module.exports = function (app) {
       b.startTime = null;
       b.track = [];
       b.dnf = false;
+      b.dns = false;
       b.dnfPosition = null;
     });
     saveState();
@@ -1865,12 +1915,30 @@ module.exports = function (app) {
     race.stopTime = atTime;
     race.scheduledCallOff = null;
     Object.values(race.boats).forEach((boat) => {
-      if (!boat.finishTime && !boat.dnf) {
+      if (!boat.finishTime && !boat.dnf && !boat.dns) {
         boat.dnf = true;
         boat.dnfPosition = getLastKnownPosition(boat);
       }
     });
     saveState();
+  }
+
+  // A race with at least one boat where every boat has either finished or
+  // been marked DNF/DNS has nothing left to time.
+  function isRaceComplete(race) {
+    const boats = Object.values(race.boats);
+    if (!boats.length) return false;
+    return boats.every((boat) => boat.finishTime || boat.dnf || boat.dns);
+  }
+
+  // Called after anything that could newly complete a race (a finish, a
+  // DNF, or removing the one boat still racing) — calls it off
+  // automatically rather than leaving the clock running with nothing left
+  // to time until someone remembers to click Stop.
+  function maybeAutoStop(race) {
+    if (race.startTime && !race.stopTime && isRaceComplete(race)) {
+      doStop(race, Date.now());
+    }
   }
 
   // Re-arms (or clears) the timer that auto-calls-off a race at its
@@ -2056,8 +2124,16 @@ module.exports = function (app) {
       });
 
       ranked.forEach((r, i) => {
-        const status = r.boat.dnf ? 'DNF' : r.boat.finishTime ? 'Finished' : race.startTime ? 'Racing' : 'Not started';
-        const rankLabel = r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : '';
+        const status = r.boat.dns
+          ? 'DNS'
+          : r.boat.dnf
+            ? 'DNF'
+            : r.boat.finishTime
+              ? 'Finished'
+              : race.startTime
+                ? 'Racing'
+                : 'Not started';
+        const rankLabel = r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : '';
         const start = effectiveStartTime(race, r.boat);
         sheet.addRow([
           rankLabel,
@@ -2237,6 +2313,7 @@ module.exports = function (app) {
         b.startTime = null;
         b.track = [];
         b.dnf = false;
+        b.dns = false;
         b.dnfPosition = null;
       });
       saveState();
@@ -2391,6 +2468,7 @@ module.exports = function (app) {
         startTime: null,
         track: [],
         dnf: false,
+        dns: false,
         dnfPosition: null,
         markTimes: {}
       };
@@ -2405,6 +2483,7 @@ module.exports = function (app) {
       if (!getBoat(race, req.params.boatId)) return res.status(404).json({ error: 'No such boat' });
       delete race.boats[req.params.boatId];
       if (race.selfBoatId === req.params.boatId) race.selfBoatId = null;
+      maybeAutoStop(race);
       saveState();
       res.json({ ok: true });
     });
@@ -2425,11 +2504,13 @@ module.exports = function (app) {
           return res.status(400).json({ error: 'finishTime must be an epoch-millisecond timestamp or null' });
         }
         boat.finishTime = t;
-        // A real finish supersedes a DNF (e.g. correcting a call-off that
-        // caught a boat that had actually already crossed the line).
+        // A real finish supersedes a DNF or DNS (e.g. correcting a call-off
+        // that caught a boat that had actually already crossed the line).
         boat.dnf = false;
+        boat.dns = false;
         boat.dnfPosition = null;
       }
+      maybeAutoStop(race);
       saveState();
       res.json(boat);
     });
@@ -2468,12 +2549,37 @@ module.exports = function (app) {
       const dnf = !!(req.body && req.body.dnf);
       if (dnf) {
         boat.dnf = true;
+        boat.dns = false;
         boat.finishTime = null;
         boat.dnfPosition = getLastKnownPosition(boat);
       } else {
         boat.dnf = false;
         boat.dnfPosition = null;
       }
+      maybeAutoStop(race);
+      saveState();
+      res.json(boat);
+    });
+
+    // Marks (or, with dns: false, un-marks) one boat DNS by hand — it never
+    // started the race at all, as distinct from DNF (started but didn't
+    // finish). Setting it also clears any finish time/DNF, since a boat
+    // can't be more than one of finished/DNF/DNS at once.
+    router.put('/races/:id/boats/:boatId/dns', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const boat = getBoat(race, req.params.boatId);
+      if (!boat) return res.status(404).json({ error: 'No such boat' });
+      const dns = !!(req.body && req.body.dns);
+      if (dns) {
+        boat.dns = true;
+        boat.dnf = false;
+        boat.finishTime = null;
+        boat.dnfPosition = null;
+      } else {
+        boat.dns = false;
+      }
+      maybeAutoStop(race);
       saveState();
       res.json(boat);
     });
@@ -2715,6 +2821,7 @@ module.exports = function (app) {
                 startTime: null,
                 track: [],
                 dnf: false,
+                dns: false,
                 dnfPosition: null,
                 markTimes: {}
               };

@@ -87,7 +87,10 @@ and a live projected finishing order — during and after the race.
   ended up as the name.
 - **Editable finish times** — click **Now** to record a finish as it happens, type a
   specific `HH:MM:SS` into the finish-time field to correct a mistimed click, or
-  **Clear** to undo. Handles races that cross midnight.
+  **Clear** to undo. Handles races that cross midnight. **DNS** marks a boat as never
+  having started at all, distinct from **DNF** (started but didn't finish) — both show
+  up as their own status in the Excel export and rank last, and either one can be
+  undone the same way. Recording a real finish time clears either.
 - **Start timer** — once a start line is set and a start is scheduled, an expandable
   **Start timer** panel shows a countdown to the gun alongside three live numbers for
   this vessel specifically (from its own SignalK GPS/speed, not any other tracked
@@ -140,13 +143,17 @@ and a live projected finishing order — during and after the race.
   rounding.
 - **Stop / call off the race** — freezes elapsed/corrected time for everyone without
   touching boats, finish times, or the course (unlike Reset, which clears the race
-  back to not-started), and marks every boat that hadn't finished as **DNF**,
-  capturing its last known AIS position if one's available. You can also schedule a
-  call-off for a future time (mirrors Schedule Start), and mark or un-mark an
-  individual boat DNF by hand at any point, independent of the whole race. There's no
+  back to not-started), and marks every boat that hadn't finished or already been
+  marked DNS as **DNF**, capturing its last known AIS position if one's available. You
+  can also schedule a call-off for a future time (mirrors Schedule Start), and mark or
+  un-mark an individual boat DNF or DNS by hand at any point, independent of the whole
+  race. There's no
   true pause: **Resume** discards the stop, un-DNFs everyone it DNF'd, and the clock
   jumps straight back to real elapsed time — the time spent stopped isn't excluded
   from anyone's result. Recording a real finish time on a DNF'd boat clears its DNF.
+  Also happens automatically the moment every boat has either finished or been marked
+  DNF — nothing left to time, so the race calls itself off rather than sitting there
+  with an idle clock until someone remembers to click Stop.
 - **Compare to a "self" boat** — click the star next to a boat's name to mark it as
   self. Every other boat then shows, in the **vs Self** column: a live-ticking
   countdown to the moment self would tie them on corrected time if that boat has

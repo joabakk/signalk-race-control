@@ -691,6 +691,25 @@
     }
   }
 
+  // Did Not Start — distinct from DNF (started but didn't finish).
+  async function setDns(boatId, dns) {
+    if (!activeRaceId) return;
+    try {
+      const boat = await fetchJSON(
+        `${API}/races/${encodeURIComponent(activeRaceId)}/boats/${encodeURIComponent(boatId)}/dns`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dns })
+        }
+      );
+      raceState.boats[boatId] = boat;
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
   async function toggleSelf(boatId) {
     if (!activeRaceId || !raceState) return;
     const nextSelf = raceState.selfBoatId === boatId ? null : boatId;
@@ -1617,7 +1636,7 @@
         // to the bottom, same as any other boat with nothing to rank by).
         // A start time still in the future (e.g. a later pursuit-start
         // group) means this boat hasn't actually started yet either.
-        const elapsedMs = !b.dnf && start && start <= now ? (b.finishTime || now) - start : null;
+        const elapsedMs = !b.dnf && !b.dns && start && start <= now ? (b.finishTime || now) - start : null;
         const tcf = b.tcf != null ? b.tcf : 1.0;
         const correctedMs = elapsedMs != null ? elapsedMs * tcf : null;
         const estimate = b.estimate || null;
@@ -1625,7 +1644,7 @@
         // boats rank on the projected corrected time when the server could
         // estimate one (course + live position/speed available), otherwise
         // fall back to elapsed-so-far like before.
-        const rankMs = b.dnf ? null : b.finishTime ? correctedMs : estimate ? estimate.estCorrectedMs : correctedMs;
+        const rankMs = b.dnf || b.dns ? null : b.finishTime ? correctedMs : estimate ? estimate.estCorrectedMs : correctedMs;
         return {
           boatId: b.id,
           name: b.name,
@@ -1635,6 +1654,7 @@
           startTime: b.startTime,
           finishTime: b.finishTime,
           dnf: !!b.dnf,
+          dns: !!b.dns,
           dnfPosition: b.dnfPosition || null,
           markTimes: b.markTimes || {},
           roundedMarksCount: b.roundedMarksCount || 0,
@@ -1699,7 +1719,7 @@
         map.set(b.boatId, { type: 'self', isLeader: isLeaderFallback });
         return;
       }
-      if (self.dnf) {
+      if (self.dnf || self.dns) {
         // Self is out of the race — no meaningful comparison to make.
         map.set(b.boatId, { type: 'none' });
         return;
@@ -1894,9 +1914,16 @@
     finishDnfBtn.textContent = 'DNF';
     finishDnfBtn.addEventListener('click', () => setDnf(boatId, true));
 
+    const finishDnsBtn = document.createElement('button');
+    finishDnsBtn.type = 'button';
+    finishDnsBtn.className = 'finish-dnf-btn';
+    finishDnsBtn.textContent = 'DNS';
+    finishDnsBtn.title = 'Did not start';
+    finishDnsBtn.addEventListener('click', () => setDns(boatId, true));
+
     const finishNormalWrap = document.createElement('div');
     finishNormalWrap.className = 'finish-cell';
-    finishNormalWrap.append(finishTimeInput, finishNowBtn, finishClearBtn, finishDnfBtn);
+    finishNormalWrap.append(finishTimeInput, finishNowBtn, finishClearBtn, finishDnfBtn, finishDnsBtn);
 
     const dnfTag = document.createElement('span');
     dnfTag.className = 'dnf-tag';
@@ -1912,8 +1939,20 @@
     dnfWrap.className = 'finish-cell';
     dnfWrap.append(dnfTag, dnfPosSpan, undoDnfBtn);
 
+    const dnsTag = document.createElement('span');
+    dnsTag.className = 'dnf-tag';
+    dnsTag.textContent = 'DNS';
+    const undoDnsBtn = document.createElement('button');
+    undoDnsBtn.type = 'button';
+    undoDnsBtn.className = 'undo-dnf-btn';
+    undoDnsBtn.textContent = 'Undo DNS';
+    undoDnsBtn.addEventListener('click', () => setDns(boatId, false));
+    const dnsWrap = document.createElement('div');
+    dnsWrap.className = 'finish-cell';
+    dnsWrap.append(dnsTag, undoDnsBtn);
+
     const tdFinish = document.createElement('td');
-    tdFinish.append(finishNormalWrap, dnfWrap);
+    tdFinish.append(finishNormalWrap, dnfWrap, dnsWrap);
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -1955,8 +1994,10 @@
       finishNowBtn,
       finishClearBtn,
       finishDnfBtn,
+      finishDnsBtn,
       dnfWrap,
       dnfPosSpan,
+      dnsWrap,
       vetHandicapVersion: -1
     };
   }
@@ -2132,7 +2173,7 @@
       const row = rows.get(b.boatId);
 
       row.tr.classList.toggle('finished', !!b.finishTime);
-      row.tr.classList.toggle('dnf', !!b.dnf);
+      row.tr.classList.toggle('dnf', !!b.dnf || !!b.dns);
       row.nameSpan.textContent = b.name;
       const isSelf = b.boatId === raceState.selfBoatId;
       row.selfBtn.textContent = isSelf ? '★' : '☆';
@@ -2227,13 +2268,14 @@
         row.tdVsSelf.title = `Corrected-time gap to the ${who} (positive = ${who} ahead)`;
       }
 
-      row.finishNormalWrap.hidden = b.dnf;
+      row.finishNormalWrap.hidden = b.dnf || b.dns;
       row.dnfWrap.hidden = !b.dnf;
+      row.dnsWrap.hidden = !b.dns;
       if (b.dnf) {
         row.dnfPosSpan.textContent = b.dnfPosition
           ? `at ${b.dnfPosition.lat.toFixed(4)}°, ${b.dnfPosition.lon.toFixed(4)}°`
           : 'position unknown';
-      } else {
+      } else if (!b.dns) {
         if (document.activeElement !== row.finishTimeInput) {
           row.finishTimeInput.value = raceState.multiDay
             ? tsToDateTimeInputValue(b.finishTime)
@@ -2244,6 +2286,7 @@
         row.finishNowBtn.disabled = !canFinish;
         row.finishClearBtn.disabled = !canFinish || !b.finishTime;
         row.finishDnfBtn.disabled = !canFinish;
+        row.finishDnsBtn.disabled = !canFinish;
       }
     });
 
