@@ -902,6 +902,11 @@ tbody tr.dnf td { color: var(--muted); }
         var aSelf = a.boat.id === race.selfBoatId;
         var bSelf = b.boat.id === race.selfBoatId;
         if (aSelf !== bSelf) return aSelf ? -1 : 1;
+        // DNS sits at the very end regardless of phase — it can be marked
+        // before the race even starts (a known no-show), and never really
+        // "entered" the race the way even a DNF (which did start) still did.
+        if (a.boat.dns !== b.boat.dns) return a.boat.dns ? 1 : -1;
+        if (a.boat.dns) return a.boat.name.localeCompare(b.boat.name);
         // Before the race actually starts, nobody has a corrected time to
         // rank by anyway — leave order exactly as race.boats gave it
         // (registration order) rather than reshuffling on every add/remove.
