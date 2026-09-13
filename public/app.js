@@ -1153,17 +1153,19 @@
     });
   }
 
-  // One name+lat+lon(+optional "use my position") row, shared by start
-  // line, finish line, and mark entry. The name field autocompletes against
-  // existing SignalK waypoints (e.g. ones already placed on a chart
-  // plotter) — picking one fills in lat/lon (and the name) from it, so a
-  // start/mark/finish position doesn't have to be typed by hand if a
-  // waypoint for it already exists. "Pick on map" is a third way in: arm
-  // it, then click the chart below to fill lat/lon from wherever was
-  // clicked. onPositionChanged (optional) fires after any of these three —
-  // used by the start line rows to let mark rows know a position now
-  // exists, so their own map-picking has an anchor to zoom around.
-  function buildPointRow(point, onPositionChanged) {
+  // One name+lat+lon+position-button row, shared by start line, finish
+  // line, and mark entry. The name field autocompletes against existing
+  // SignalK waypoints (e.g. ones already placed on a chart plotter) —
+  // picking one fills in lat/lon (and the name) from it, so a position
+  // doesn't have to be typed by hand if a waypoint for it already exists.
+  // The one button toggles with whether this row already has a position:
+  // "Pick on map" while empty (arm it, then click the chart below to fill
+  // lat/lon from wherever was clicked), "Use my position" once it has one
+  // (a quick way to re-centre it on wherever you are right now instead).
+  // Mark rows' own map-picking gating (see updateMarkPickGating) is
+  // recomputed on every position-setting action here, on any row, since a
+  // start line change is typically what unlocks it.
+  function buildPointRow(point) {
     const row = document.createElement('div');
     row.className = 'course-point-row';
 
@@ -1196,33 +1198,49 @@
     lonInput.placeholder = 'Lon';
     lonInput.value = point ? point.lon : '';
 
-    latInput.addEventListener('input', () => onPositionChanged && onPositionChanged());
-    lonInput.addEventListener('input', () => onPositionChanged && onPositionChanged());
+    const posBtn = document.createElement('button');
+    posBtn.type = 'button';
+    posBtn.className = 'secondary pick-on-map-btn';
 
-    const useHereBtn = document.createElement('button');
-    useHereBtn.type = 'button';
-    useHereBtn.className = 'secondary';
-    useHereBtn.textContent = 'Use my position';
-    useHereBtn.addEventListener('click', async () => {
+    function hasPosition() {
+      return latInput.value !== '' && lonInput.value !== '';
+    }
+    function updatePosBtnLabel() {
+      posBtn.textContent = hasPosition() ? 'Use my position' : 'Pick on map';
+    }
+    // Cheap enough to run on every keystroke — label state and mark
+    // gating both just check whether lat/lon are non-empty.
+    function notifyPositionChanged() {
+      updatePosBtnLabel();
+      updateMarkPickGating();
+    }
+    // The heavier, best-effort name suggestion only makes sense after a
+    // real discrete action (a map click, a self-position fetch) — not on
+    // every keystroke while someone's still typing lat/lon by hand.
+    function handlePositionSet() {
+      notifyPositionChanged();
+      maybeSuggestNameFromPosition(nameInput, latInput.value, lonInput.value);
+    }
+
+    latInput.addEventListener('input', notifyPositionChanged);
+    lonInput.addEventListener('input', notifyPositionChanged);
+
+    posBtn.addEventListener('click', async () => {
+      if (!hasPosition()) {
+        if (mapPickTarget && mapPickTarget.btn === posBtn) {
+          cancelMapPick();
+        } else {
+          armMapPick(latInput, lonInput, posBtn, nameInput.placeholder || 'this point', handlePositionSet);
+        }
+        return;
+      }
       const pos = await fetchSelfPosition();
       if (pos) {
         latInput.value = pos.lat;
         lonInput.value = pos.lon;
-        if (onPositionChanged) onPositionChanged();
+        handlePositionSet();
       } else {
         setCourseStatus('Could not read a current position from SignalK.', true);
-      }
-    });
-
-    const pickBtn = document.createElement('button');
-    pickBtn.type = 'button';
-    pickBtn.className = 'secondary pick-on-map-btn';
-    pickBtn.textContent = 'Pick on map';
-    pickBtn.addEventListener('click', () => {
-      if (mapPickTarget && mapPickTarget.btn === pickBtn) {
-        cancelMapPick();
-      } else {
-        armMapPick(latInput, lonInput, pickBtn, nameInput.placeholder || 'this point', onPositionChanged);
       }
     });
 
@@ -1234,12 +1252,33 @@
         nameInput.value = wp.name;
         latInput.value = wp.lat;
         lonInput.value = wp.lon;
-        if (onPositionChanged) onPositionChanged();
+        notifyPositionChanged();
       }
     );
 
-    row.append(nameWrap, latInput, lonInput, useHereBtn, pickBtn);
-    return { row, nameInput, latInput, lonInput, pickBtn };
+    updatePosBtnLabel();
+    row.append(nameWrap, latInput, lonInput, posBtn);
+    return { row, nameInput, latInput, lonInput, pickBtn: posBtn, hasPosition };
+  }
+
+  // Best-effort: suggests a name for an unnamed point from OpenStreetMap's
+  // reverse geocoding once a position is actually set (by map click or
+  // self-position — not while still typing lat/lon by hand), so a
+  // start/finish pin or a rounding mark doesn't have to be named from
+  // scratch when there's a real charted place right there (a headland, a
+  // skerry, a harbour). Never overwrites a name already typed or already
+  // filled in from picking a waypoint; silently does nothing on any
+  // failure, same spirit as the VET/KTK/waypoint lookups elsewhere.
+  async function maybeSuggestNameFromPosition(nameInput, lat, lon) {
+    if (nameInput.value.trim()) return;
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=16&addressdetails=0`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && data.name && !nameInput.value.trim()) nameInput.value = data.name;
+    } catch (e) {
+      // best-effort only
+    }
   }
 
   // Arms "pick on map" mode: the next click on the chart fills this row's
@@ -1263,18 +1302,22 @@
 
   // Marks need somewhere on the map worth clicking into — before the start
   // line has a position, the chart has nothing to anchor its zoom to and
-  // is still showing the whole world (see chartFitDone). Typed lat/lon and
-  // "Use my position" stay available for marks regardless.
+  // is still showing the whole world (see chartFitDone). This only ever
+  // gates the "Pick on map" state of a mark's button, never "Use my
+  // position" — once a mark already has its own position (typed by hand,
+  // or picked from a waypoint), re-centring it on self is always fine
+  // regardless of the start line.
   function startLineHasPosition() {
     return !!(startLineRefs && startLineRefs.some((r) => r.latInput.value !== '' && r.lonInput.value !== ''));
   }
 
   function updateMarkPickGating() {
-    const enabled = startLineHasPosition();
+    const startOk = startLineHasPosition();
     markRefs.forEach((r) => {
       if (!r.pickBtn) return;
-      r.pickBtn.disabled = !enabled;
-      r.pickBtn.title = enabled ? '' : 'Set the start line first — the map needs a position to zoom to before you can pick one for a mark.';
+      const gated = !r.hasPosition() && !startOk;
+      r.pickBtn.disabled = gated;
+      r.pickBtn.title = gated ? 'Set the start line first — the map needs a position to zoom to before you can pick one for a mark.' : '';
     });
   }
 
@@ -1334,10 +1377,7 @@
     const c = (raceState && raceState.course) || { startLine: null, marks: [], finishLine: null };
 
     cancelMapPick();
-    startLineRefs = [
-      buildPointRow(c.startLine ? c.startLine[0] : null, updateMarkPickGating),
-      buildPointRow(c.startLine ? c.startLine[1] : null, updateMarkPickGating)
-    ];
+    startLineRefs = [buildPointRow(c.startLine ? c.startLine[0] : null), buildPointRow(c.startLine ? c.startLine[1] : null)];
     startLineRefs[0].nameInput.placeholder = 'Pin end name';
     startLineRefs[1].nameInput.placeholder = 'Committee boat end name';
     startLineRowsEl.innerHTML = '';

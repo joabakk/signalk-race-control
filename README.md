@@ -100,15 +100,21 @@ and a live projected finishing order — during and after the race.
   the line before the gun. Disappears once the race actually starts, since the
   pre-start approach is moot by then.
 - **Course & chart** — set the start line, an ordered list of rounding marks, and the
-  finish line by whichever's easiest: type lat/lon directly, click **Use my position**
-  if you're sitting at that spot, type a name to autocomplete against existing SignalK
-  waypoints (e.g. ones already placed from a chart plotter) and pick one to fill in its
-  position, or click **Pick on map** and then click the spot on the chart below. A
-  mark's own **Pick on map** only turns on once the start line has a position — before
-  that the chart has nothing to anchor its zoom to and is still showing the whole
-  world, not much use to click into. Every other known waypoint (not part of this
-  race's own course) shows on the chart too, as a small dim pin with its name, so it's
-  there to reference — or type into a mark's name field — even before it's used.
+  finish line by whichever's easiest: type lat/lon directly, type a name to autocomplete
+  against existing SignalK waypoints (e.g. ones already placed from a chart plotter) and
+  pick one to fill in its position, or use the position button — it reads **Pick on
+  map** while that point is still unset (arm it, then click the spot on the chart
+  below), and switches to **Use my position** once it has one, to re-centre it on
+  wherever you are right now instead. Setting a position this way (map click or self
+  position — not while still typing lat/lon by hand) also suggests a name for it from
+  OpenStreetMap, when there's a real charted place right there and the name field is
+  still empty; typing or picking a waypoint always wins over the suggestion. A mark's
+  own **Pick on map** only turns on once the start line has a position — before that the
+  chart has nothing to anchor its zoom to and is still showing the whole world, not much
+  use to click into (typed lat/lon, autocomplete, and "Use my position" all stay
+  available regardless). Every other known waypoint (not part of this race's own
+  course) shows on the chart too, as a small dim pin with its name, so it's there to
+  reference — or type into a mark's name field — even before it's used.
   The chart itself is a real background map, like freeboard-sk's: it uses whatever
   tile-based chart resource this SignalK server has registered, or falls back to public
   OpenStreetMap + OpenSeaMap tiles when none is configured (same fallback freeboard-sk
