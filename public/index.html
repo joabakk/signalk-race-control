@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Race Control</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -86,7 +87,8 @@
           <span id="courseStatusText" class="status"></span>
         </div>
         <div class="chart-wrap">
-          <svg id="courseChart" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet"></svg>
+          <div id="courseChart" class="chart-map"></div>
+          <p id="chartEmptyMsg" class="empty chart-empty-msg" hidden>Add a course, then start the race, to see the chart here</p>
           <div id="replayControls" class="replay-controls" hidden>
             <input type="range" id="replaySlider" min="0" max="100" value="100" />
             <span id="replayTimeLabel">Live</span>
@@ -171,6 +173,7 @@
     </div>
     <p id="emptyMsg" class="empty" hidden>No boats added yet. Use "Add Boat" above to enter the fleet.</p>
   </main>
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

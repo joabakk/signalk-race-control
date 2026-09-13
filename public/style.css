@@ -398,15 +398,47 @@ main {
 
 .chart-wrap {
   margin-top: 1rem;
+  position: relative;
 }
 
-#courseChart {
+.chart-empty-msg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  pointer-events: none;
+  z-index: 1000;
+  background: var(--panel);
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.chart-map {
   width: 100%;
   max-width: 800px;
-  height: auto;
+  height: 500px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.chart-map .leaflet-tooltip.mark-label,
+.chart-map .leaflet-tooltip.waypoint-label,
+.chart-map .leaflet-tooltip.boat-label {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chart-map .leaflet-tooltip.waypoint-label {
+  font-weight: 400;
+  opacity: 0.85;
 }
 
 .replay-controls {

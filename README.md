@@ -102,9 +102,15 @@ and a live projected finishing order — during and after the race.
 - **Course & chart** — enter lat/lon for the start line, an ordered list of rounding
   marks, and the finish line (or click **Use my position** if you're sitting at that
   spot, or type a name to autocomplete against existing SignalK waypoints — e.g. ones
-  already placed from a chart plotter — and pick one to fill in its position). The
-  webapp draws them on a built-in chart, overlaid with each AIS-tracked boat's
-  recorded track for the current race — drag the **replay** slider to step back
+  already placed from a chart plotter — and pick one to fill in its position; typing
+  lat/lon directly works just as well). Every other known waypoint (not part of this
+  race's own course) shows on the chart too, as a small dim pin with its name, so it's
+  there to reference — or type into a mark's name field — even before it's used.
+  The chart itself is a real background map, like freeboard-sk's: it uses whatever
+  tile-based chart resource this SignalK server has registered, or falls back to public
+  OpenStreetMap + OpenSeaMap tiles when none is configured (same fallback freeboard-sk
+  itself uses). Overlaid on it is each AIS-tracked boat's recorded track for the current
+  race — drag the **replay** slider to step back
   through it, or leave it on **Live**. Click **Play** to have it step through on its own
   instead, at whatever speed the adjoining slider is set to (1x-60x); it starts over
   from the earliest recorded position when played from Live (there's nothing to play

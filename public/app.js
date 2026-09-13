@@ -31,6 +31,10 @@
   let replayPlayTimer = null;
   let replayPlayLastTick = null;
   let waypoints = []; // [{id, name, lat, lon}] from SignalK resources, for the course editor's "Pick a waypoint" dropdown
+  let chartMap = null; // Leaflet map, created lazily once the chart section is first expanded
+  let chartLayerGroup = null; // holds everything renderChart() redraws, cleared and rebuilt each call
+  let chartActiveRaceId; // which race's bounds were last auto-fit, so switching races re-fits once
+  let chartFitDone = false;
 
   const raceSelect = document.getElementById('raceSelect');
   const newRaceBtn = document.getElementById('newRaceBtn');
@@ -83,6 +87,7 @@
   const saveCourseBtn = document.getElementById('saveCourseBtn');
   const courseStatusText = document.getElementById('courseStatusText');
   const courseChart = document.getElementById('courseChart');
+  const chartEmptyMsg = document.getElementById('chartEmptyMsg');
   const replayControls = document.getElementById('replayControls');
   const replaySlider = document.getElementById('replaySlider');
   const replayTimeLabel = document.getElementById('replayTimeLabel');
@@ -1477,79 +1482,123 @@
 
   const CHART_PALETTE = ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#34d399', '#fb923c', '#60a5fa', '#facc15'];
 
-  // Simple equirectangular fit (longitude scaled by cos(mean latitude) so
-  // the small area a race course covers looks roughly to-scale) mapped into
-  // the SVG's viewBox with padding. Re-derived on every render rather than
-  // held fixed, since the bounding box grows as tracks come in.
-  function buildProjection(points, width, height, padding) {
-    const meanLat = points.reduce((s, p) => s + p.lat, 0) / points.length;
-    const cosLat = Math.cos((meanLat * Math.PI) / 180) || 1;
-    const xs = points.map((p) => p.lon * cosLat);
-    const ys = points.map((p) => -p.lat);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const spanX = Math.max(maxX - minX, 1e-9);
-    const spanY = Math.max(maxY - minY, 1e-9);
-    const scale = Math.min((width - 2 * padding) / spanX, (height - 2 * padding) / spanY);
-    const offX = padding + (width - 2 * padding - spanX * scale) / 2;
-    const offY = padding + (height - 2 * padding - spanY * scale) / 2;
-    return (p) => ({ x: offX + (p.lon * cosLat - minX) * scale, y: offY + (-p.lat - minY) * scale });
+  function ll(pt) {
+    return [pt.lat, pt.lon];
+  }
+
+  function midpoint(a, b) {
+    return { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 };
+  }
+
+  // Created lazily, the first time the chart actually has somewhere to
+  // render into — Leaflet can't size a map inside a still-hidden container,
+  // and the course section starts collapsed.
+  function ensureChartMap() {
+    if (chartMap || typeof L === 'undefined') return chartMap;
+    chartMap = L.map(courseChart, { attributionControl: true }).setView([0, 0], 2);
+    chartLayerGroup = L.layerGroup().addTo(chartMap);
+    addChartBaseLayers(chartMap);
+    return chartMap;
+  }
+
+  // Prefers whatever tile-based chart resource this SignalK server has
+  // registered (e.g. a locally cached raster chart) — same as freeboard-sk
+  // itself would use. Falls back to public OpenStreetMap + OpenSeaMap
+  // tiles when none is configured, which is also freeboard-sk's own
+  // fallback with no chart provider installed.
+  async function addChartBaseLayers(map) {
+    let tileCharts = [];
+    try {
+      const data = await fetchJSON(`${API}/charts`);
+      tileCharts = data.charts || [];
+    } catch (e) {
+      tileCharts = [];
+    }
+    if (tileCharts.length) {
+      tileCharts.forEach((c) => {
+        const opts = { maxZoom: c.maxzoom || 19, minZoom: c.minzoom || 0, attribution: c.name || '' };
+        if (Array.isArray(c.bounds) && c.bounds.length === 4) {
+          opts.bounds = [
+            [c.bounds[1], c.bounds[0]],
+            [c.bounds[3], c.bounds[2]]
+          ];
+        }
+        L.tileLayer(c.url, opts).addTo(map);
+      });
+    } else {
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(map);
+      L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; <a href="https://www.openseamap.org">OpenSeaMap</a>'
+      }).addTo(map);
+    }
   }
 
   function renderChart() {
+    if (courseBody.hidden) return; // nothing to size a map into yet
+    const map = ensureChartMap();
+    if (!map) return; // Leaflet didn't load (offline, blocked) — rest of the app is unaffected
+    chartLayerGroup.clearLayers();
+
+    if (chartActiveRaceId !== activeRaceId) {
+      chartActiveRaceId = activeRaceId;
+      chartFitDone = false;
+    }
+
     if (!raceState) {
-      courseChart.innerHTML = '';
+      chartEmptyMsg.hidden = false;
       replayControls.hidden = true;
       return;
     }
+
     const course = raceState.course || { startLine: null, marks: [], finishLine: null };
     const boatsWithTrack = Object.values(raceState.boats || {}).filter((b) => b.track && b.track.length);
+    // Waypoints this same race already published back as its own start/
+    // finish/marks (see publishCourseResources server-side) would otherwise
+    // double up here — once as a plain waypoint pin, once as the actual
+    // course element — so they're left out of the generic waypoint layer.
+    const ownPrefix = `${raceState.name} — `;
+    const otherWaypoints = waypoints.filter((w) => !w.name || !w.name.startsWith(ownPrefix));
 
-    const allPoints = [];
-    if (course.startLine) allPoints.push(...course.startLine);
-    if (course.finishLine) allPoints.push(...course.finishLine);
-    allPoints.push(...course.marks);
-    boatsWithTrack.forEach((b) => allPoints.push(...b.track));
+    const boundsPts = [];
+    if (course.startLine) boundsPts.push(...course.startLine);
+    if (course.finishLine) boundsPts.push(...course.finishLine);
+    boundsPts.push(...course.marks);
+    otherWaypoints.forEach((w) => boundsPts.push(w));
+    boatsWithTrack.forEach((b) => boundsPts.push(...b.track));
+    chartEmptyMsg.hidden = boundsPts.length > 0;
 
-    if (allPoints.length < 2) {
-      courseChart.innerHTML =
-        '<text x="400" y="250" text-anchor="middle" fill="var(--muted)" font-size="14">Add a course, then start the race, to see the chart here</text>';
-      replayControls.hidden = true;
-      return;
-    }
-
-    const width = 800;
-    const height = 500;
-    const proj = buildProjection(allPoints, width, height, 40);
-    const parts = [];
+    otherWaypoints.forEach((w) => {
+      L.circleMarker(ll(w), { radius: 4, weight: 1, color: 'var(--muted)', fillColor: 'var(--panel)', fillOpacity: 0.6 })
+        .bindTooltip(`<span style="color:var(--muted)">${escapeHtml(w.name)}</span>`, { permanent: true, direction: 'top', offset: [0, -6], className: 'waypoint-label' })
+        .addTo(chartLayerGroup);
+    });
 
     const coursePts = [];
-    if (course.startLine) coursePts.push({ lat: (course.startLine[0].lat + course.startLine[1].lat) / 2, lon: (course.startLine[0].lon + course.startLine[1].lon) / 2 });
+    if (course.startLine) coursePts.push(midpoint(course.startLine[0], course.startLine[1]));
     course.marks.forEach((m) => coursePts.push(m));
-    if (course.finishLine) coursePts.push({ lat: (course.finishLine[0].lat + course.finishLine[1].lat) / 2, lon: (course.finishLine[0].lon + course.finishLine[1].lon) / 2 });
+    if (course.finishLine) coursePts.push(midpoint(course.finishLine[0], course.finishLine[1]));
     if (coursePts.length >= 2) {
-      const d = coursePts.map((p, i) => (i === 0 ? 'M' : 'L') + proj(p).x.toFixed(1) + ',' + proj(p).y.toFixed(1)).join(' ');
-      parts.push(`<path d="${d}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4,4" />`);
+      L.polyline(coursePts.map(ll), { color: 'var(--muted)', weight: 1.5, dashArray: '4,4' }).addTo(chartLayerGroup);
     }
 
     if (course.startLine) {
-      const a = proj(course.startLine[0]);
-      const b = proj(course.startLine[1]);
-      parts.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="var(--good)" stroke-width="2" />`);
-      parts.push(`<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}" fill="var(--good)" font-size="11" text-anchor="middle">Start</text>`);
+      L.polyline(course.startLine.map(ll), { color: 'var(--good)', weight: 2 })
+        .bindTooltip('<span style="color:var(--good)">Start</span>', { permanent: true, direction: 'center', className: 'mark-label' })
+        .addTo(chartLayerGroup);
     }
     if (course.finishLine) {
-      const a = proj(course.finishLine[0]);
-      const b = proj(course.finishLine[1]);
-      parts.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="var(--accent)" stroke-width="2" />`);
-      parts.push(`<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}" fill="var(--accent)" font-size="11" text-anchor="middle">Finish</text>`);
+      L.polyline(course.finishLine.map(ll), { color: 'var(--accent)', weight: 2 })
+        .bindTooltip('<span style="color:var(--accent)">Finish</span>', { permanent: true, direction: 'center', className: 'mark-label' })
+        .addTo(chartLayerGroup);
     }
     course.marks.forEach((m, i) => {
-      const p = proj(m);
-      parts.push(`<circle cx="${p.x}" cy="${p.y}" r="5" fill="var(--bg)" stroke="var(--text)" stroke-width="1.5" />`);
-      parts.push(`<text x="${p.x}" y="${p.y - 10}" fill="var(--text)" font-size="11" text-anchor="middle">${escapeHtml(m.name || String(i + 1))}</text>`);
+      L.circleMarker(ll(m), { radius: 5, weight: 1.5, color: 'var(--text)', fillColor: 'var(--bg)', fillOpacity: 1 })
+        .bindTooltip(`<span style="color:var(--text)">${escapeHtml(m.name || String(i + 1))}</span>`, { permanent: true, direction: 'top', offset: [0, -8], className: 'mark-label' })
+        .addTo(chartLayerGroup);
     });
 
     let minT = Infinity;
@@ -1590,11 +1639,9 @@
       const color = CHART_PALETTE[idx % CHART_PALETTE.length];
       const pts = b.track.filter((pt) => pt.t <= cutoff);
       if (!pts.length) return;
-      const d = pts.map((pt, i) => (i === 0 ? 'M' : 'L') + proj(pt).x.toFixed(1) + ',' + proj(pt).y.toFixed(1)).join(' ');
-      parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.85" />`);
+      L.polyline(pts.map(ll), { color, weight: 1.5, opacity: 0.85 }).addTo(chartLayerGroup);
       pts.forEach((pt) => {
-        const p = proj(pt);
-        parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2" fill="${color}" opacity="0.7" />`);
+        L.circleMarker(ll(pt), { radius: 2, weight: 0, color, fillColor: color, fillOpacity: 0.7 }).addTo(chartLayerGroup);
       });
       for (let i = 1; i < pts.length; i++) {
         const prevPt = pts[i - 1];
@@ -1602,11 +1649,10 @@
         if (typeof prevPt.sog !== 'number' || typeof pt.sog !== 'number') continue;
         const delta = pt.sog - prevPt.sog;
         if (delta < SPEED_INCREASE_MS) continue;
-        const p = proj(pt);
-        const r = Math.min(4 + delta * 2, 10).toFixed(1);
-        parts.push(
-          `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="none" stroke="${color}" stroke-width="2"><title>${escapeHtml(b.name)}: sped up to ${(pt.sog * 1.94384).toFixed(1)} kn</title></circle>`
-        );
+        const r = Math.min(4 + delta * 2, 10);
+        L.circleMarker(ll(pt), { radius: r, weight: 2, color, fill: false })
+          .bindTooltip(`${escapeHtml(b.name)}: sped up to ${(pt.sog * 1.94384).toFixed(1)} kn`)
+          .addTo(chartLayerGroup);
       }
 
       const prev = pts[pts.length - 1];
@@ -1620,16 +1666,22 @@
           interpolated = true;
         }
       }
-      const cur = proj(current);
-      if (interpolated) {
-        parts.push(`<circle cx="${cur.x}" cy="${cur.y}" r="4" fill="${color}" fill-opacity="0.35" stroke="${color}" stroke-width="1.5" stroke-dasharray="2,1.5" />`);
-      } else {
-        parts.push(`<circle cx="${cur.x}" cy="${cur.y}" r="4" fill="${color}" />`);
-      }
-      parts.push(`<text x="${(cur.x + 7).toFixed(1)}" y="${(cur.y + 3).toFixed(1)}" fill="${color}" font-size="10">${escapeHtml(b.name)}</text>`);
+      const curOpts = interpolated
+        ? { radius: 4, color, weight: 1.5, dashArray: '2,1.5', fillColor: color, fillOpacity: 0.35 }
+        : { radius: 4, color, weight: 0, fillColor: color, fillOpacity: 1 };
+      L.circleMarker(ll(current), curOpts)
+        .bindTooltip(`<span style="color:${color}">${escapeHtml(b.name)}</span>`, { permanent: true, direction: 'right', offset: [7, 0], className: 'boat-label' })
+        .addTo(chartLayerGroup);
     });
 
-    courseChart.innerHTML = parts.join('');
+    if (!chartFitDone && boundsPts.length) {
+      if (boundsPts.length === 1) {
+        map.setView(ll(boundsPts[0]), 15);
+      } else {
+        map.fitBounds(boundsPts.map(ll), { padding: [30, 30] });
+      }
+      chartFitDone = true;
+    }
 
     replayControls.hidden = boatsWithTrack.length === 0 || !isFinite(minT);
     if (!replayControls.hidden && document.activeElement !== replaySlider) {
@@ -2394,7 +2446,13 @@
   courseToggleBtn.addEventListener('click', () => {
     courseBody.hidden = !courseBody.hidden;
     courseToggleBtn.textContent = (courseBody.hidden ? '▸' : '▾') + ' Course & chart';
-    if (!courseBody.hidden) renderChart();
+    if (!courseBody.hidden) {
+      renderChart();
+      // The map may have been created (or last sized) while its container
+      // was hidden or a different size — Leaflet doesn't pick that up on
+      // its own.
+      if (chartMap) setTimeout(() => chartMap.invalidateSize(), 0);
+    }
   });
   startTimerToggleBtn.addEventListener('click', () => {
     startTimerBody.hidden = !startTimerBody.hidden;

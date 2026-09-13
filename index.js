@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 
 const DEFAULT_HANDICAP_SOURCE_PAGE = 'https://ssca.no/aktiviteter/vet-tall';
@@ -1840,6 +1841,26 @@ module.exports = function (app) {
       });
   }
 
+  // SignalK resource ids must be UUIDs (the resources-provider rejects
+  // anything else) — this derives one deterministically from a stable seed
+  // string, so re-publishing the same course/mark updates the same
+  // resource instead of leaving a new one behind every time it's saved.
+  function deterministicUuid(seed) {
+    const hash = crypto.createHash('sha1').update(seed).digest('hex');
+    return (
+      hash.slice(0, 8) +
+      '-' +
+      hash.slice(8, 12) +
+      '-4' +
+      hash.slice(13, 16) +
+      '-' +
+      ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16) +
+      hash.slice(17, 20) +
+      '-' +
+      hash.slice(20, 32)
+    );
+  }
+
   function waypointResource(name, pt) {
     return {
       name,
@@ -1871,7 +1892,7 @@ module.exports = function (app) {
     if (!app.resourcesApi || typeof app.resourcesApi.setResource !== 'function') return;
     try {
       const points = [];
-      const put = (id, name, pt) => app.resourcesApi.setResource('waypoints', id, waypointResource(name, pt));
+      const put = (seed, name, pt) => app.resourcesApi.setResource('waypoints', deterministicUuid(seed), waypointResource(name, pt));
       if (race.course.startLine) {
         await put(`race-${race.id}-start-pin`, `${race.name} — Start (pin)`, race.course.startLine[0]);
         await put(`race-${race.id}-start-committee`, `${race.name} — Start (committee)`, race.course.startLine[1]);
@@ -1887,7 +1908,7 @@ module.exports = function (app) {
         points.push(race.course.finishLine[0], race.course.finishLine[1]);
       }
       if (points.length >= 2) {
-        await app.resourcesApi.setResource('routes', `race-${race.id}-course`, routeResource(race.name, points));
+        await app.resourcesApi.setResource('routes', deterministicUuid(`race-${race.id}-course`), routeResource(race.name, points));
       }
     } catch (e) {
       app.debug('race-control: could not publish course to SignalK resources: ' + e.message);
@@ -2767,6 +2788,32 @@ module.exports = function (app) {
         res.json({ waypoints });
       } catch (e) {
         res.json({ waypoints: [] });
+      }
+    });
+
+    // Background chart tiles for the webapp's course/replay map — same
+    // "best-effort, never fails the caller" spirit as /waypoints. Only
+    // tilelayer-type chart resources are usable here (a plain XYZ tile URL
+    // template); WMS/WMTS/mapstyleJSON/S-57 sources need more than a tile
+    // layer to render and are left for a future version. The webapp falls
+    // back to public OpenStreetMap/OpenSeaMap tiles when this returns none,
+    // same as freeboard-sk itself does with no chart provider installed.
+    router.get('/charts', async (req, res) => {
+      if (!app.resourcesApi || typeof app.resourcesApi.listResources !== 'function') {
+        return res.json({ charts: [] });
+      }
+      try {
+        const data = await app.resourcesApi.listResources('charts', {});
+        const charts = Object.keys(data || {})
+          .map((id) => {
+            const c = data[id] || {};
+            if (c.type !== 'tilelayer' || !c.url) return null;
+            return { id, name: c.name || id, url: c.url, minzoom: c.minzoom, maxzoom: c.maxzoom, bounds: c.bounds };
+          })
+          .filter(Boolean);
+        res.json({ charts });
+      } catch (e) {
+        res.json({ charts: [] });
       }
     });
 
