@@ -35,6 +35,7 @@
   let chartLayerGroup = null; // holds everything renderChart() redraws, cleared and rebuilt each call
   let chartActiveRaceId; // which race's bounds were last auto-fit, so switching races re-fits once
   let chartFitDone = false;
+  let mapPickTarget = null; // { latInput, lonInput, btn, onPositionChanged } while armed, else null
 
   const raceSelect = document.getElementById('raceSelect');
   const newRaceBtn = document.getElementById('newRaceBtn');
@@ -1157,8 +1158,12 @@
   // existing SignalK waypoints (e.g. ones already placed on a chart
   // plotter) — picking one fills in lat/lon (and the name) from it, so a
   // start/mark/finish position doesn't have to be typed by hand if a
-  // waypoint for it already exists.
-  function buildPointRow(point) {
+  // waypoint for it already exists. "Pick on map" is a third way in: arm
+  // it, then click the chart below to fill lat/lon from wherever was
+  // clicked. onPositionChanged (optional) fires after any of these three —
+  // used by the start line rows to let mark rows know a position now
+  // exists, so their own map-picking has an anchor to zoom around.
+  function buildPointRow(point, onPositionChanged) {
     const row = document.createElement('div');
     row.className = 'course-point-row';
 
@@ -1191,6 +1196,9 @@
     lonInput.placeholder = 'Lon';
     lonInput.value = point ? point.lon : '';
 
+    latInput.addEventListener('input', () => onPositionChanged && onPositionChanged());
+    lonInput.addEventListener('input', () => onPositionChanged && onPositionChanged());
+
     const useHereBtn = document.createElement('button');
     useHereBtn.type = 'button';
     useHereBtn.className = 'secondary';
@@ -1200,8 +1208,21 @@
       if (pos) {
         latInput.value = pos.lat;
         lonInput.value = pos.lon;
+        if (onPositionChanged) onPositionChanged();
       } else {
         setCourseStatus('Could not read a current position from SignalK.', true);
+      }
+    });
+
+    const pickBtn = document.createElement('button');
+    pickBtn.type = 'button';
+    pickBtn.className = 'secondary pick-on-map-btn';
+    pickBtn.textContent = 'Pick on map';
+    pickBtn.addEventListener('click', () => {
+      if (mapPickTarget && mapPickTarget.btn === pickBtn) {
+        cancelMapPick();
+      } else {
+        armMapPick(latInput, lonInput, pickBtn, nameInput.placeholder || 'this point', onPositionChanged);
       }
     });
 
@@ -1213,11 +1234,48 @@
         nameInput.value = wp.name;
         latInput.value = wp.lat;
         lonInput.value = wp.lon;
+        if (onPositionChanged) onPositionChanged();
       }
     );
 
-    row.append(nameWrap, latInput, lonInput, useHereBtn);
-    return { row, nameInput, latInput, lonInput };
+    row.append(nameWrap, latInput, lonInput, useHereBtn, pickBtn);
+    return { row, nameInput, latInput, lonInput, pickBtn };
+  }
+
+  // Arms "pick on map" mode: the next click on the chart fills this row's
+  // lat/lon from wherever was clicked. Clicking the same button again, a
+  // different row's pick button, or Escape all cancel it.
+  function armMapPick(latInput, lonInput, btn, label, onPositionChanged) {
+    cancelMapPick();
+    mapPickTarget = { latInput, lonInput, btn, onPositionChanged };
+    btn.classList.add('active');
+    courseChart.classList.add('picking');
+    setCourseStatus(`Click the map below to place "${label}".`);
+  }
+
+  function cancelMapPick() {
+    if (!mapPickTarget) return;
+    mapPickTarget.btn.classList.remove('active');
+    mapPickTarget = null;
+    courseChart.classList.remove('picking');
+    setCourseStatus('');
+  }
+
+  // Marks need somewhere on the map worth clicking into — before the start
+  // line has a position, the chart has nothing to anchor its zoom to and
+  // is still showing the whole world (see chartFitDone). Typed lat/lon and
+  // "Use my position" stay available for marks regardless.
+  function startLineHasPosition() {
+    return !!(startLineRefs && startLineRefs.some((r) => r.latInput.value !== '' && r.lonInput.value !== ''));
+  }
+
+  function updateMarkPickGating() {
+    const enabled = startLineHasPosition();
+    markRefs.forEach((r) => {
+      if (!r.pickBtn) return;
+      r.pickBtn.disabled = !enabled;
+      r.pickBtn.title = enabled ? '' : 'Set the start line first — the map needs a position to zoom to before you can pick one for a mark.';
+    });
   }
 
   function renderMarkRows() {
@@ -1275,7 +1333,11 @@
   function loadCourseFormFromRace() {
     const c = (raceState && raceState.course) || { startLine: null, marks: [], finishLine: null };
 
-    startLineRefs = [buildPointRow(c.startLine ? c.startLine[0] : null), buildPointRow(c.startLine ? c.startLine[1] : null)];
+    cancelMapPick();
+    startLineRefs = [
+      buildPointRow(c.startLine ? c.startLine[0] : null, updateMarkPickGating),
+      buildPointRow(c.startLine ? c.startLine[1] : null, updateMarkPickGating)
+    ];
     startLineRefs[0].nameInput.placeholder = 'Pin end name';
     startLineRefs[1].nameInput.placeholder = 'Committee boat end name';
     startLineRowsEl.innerHTML = '';
@@ -1289,6 +1351,7 @@
 
     markRefs = (c.marks || []).map((m) => buildMarkRow(m));
     renderMarkRows();
+    updateMarkPickGating();
     setCourseStatus('');
   }
 
@@ -1498,6 +1561,14 @@
     chartMap = L.map(courseChart, { attributionControl: true }).setView([0, 0], 2);
     chartLayerGroup = L.layerGroup().addTo(chartMap);
     addChartBaseLayers(chartMap);
+    chartMap.on('click', (e) => {
+      if (!mapPickTarget) return;
+      const target = mapPickTarget;
+      target.latInput.value = e.latlng.lat.toFixed(6);
+      target.lonInput.value = e.latlng.lng.toFixed(6);
+      cancelMapPick();
+      if (target.onPositionChanged) target.onPositionChanged();
+    });
     return chartMap;
   }
 
@@ -2468,6 +2539,10 @@
   addMarkBtn.addEventListener('click', () => {
     markRefs.push(buildMarkRow(null));
     renderMarkRows();
+    updateMarkPickGating();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && mapPickTarget) cancelMapPick();
   });
   saveCourseBtn.addEventListener('click', saveCourse);
 

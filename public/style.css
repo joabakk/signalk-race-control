@@ -300,6 +300,15 @@ main {
   align-items: center;
 }
 
+.course-point-row .course-name-autocomplete .suggestions {
+  /* The name field itself is only 7rem wide to fit inline in the row, but
+     the dropdown it opens shouldn't be squeezed to match — that made boat
+     and waypoint names unreadable. right:auto lets it grow past the
+     parent's edge instead of being pinned to it. */
+  right: auto;
+  min-width: 16rem;
+}
+
 .course-point-row .course-name-autocomplete {
   position: relative;
   width: 7rem;
@@ -328,6 +337,16 @@ main {
 .course-point-row button {
   padding: 0.3rem 0.5rem;
   font-size: 0.75rem;
+}
+
+.course-point-row button.pick-on-map-btn.active {
+  background: var(--accent);
+  color: #04202e;
+  border-color: var(--accent);
+}
+
+.chart-map.picking {
+  cursor: crosshair;
 }
 
 .course-actions {

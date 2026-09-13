@@ -99,11 +99,14 @@ and a live projected finishing order — during and after the race.
   slow down or take a longer approach); negative means you're behind schedule to make
   the line before the gun. Disappears once the race actually starts, since the
   pre-start approach is moot by then.
-- **Course & chart** — enter lat/lon for the start line, an ordered list of rounding
-  marks, and the finish line (or click **Use my position** if you're sitting at that
-  spot, or type a name to autocomplete against existing SignalK waypoints — e.g. ones
-  already placed from a chart plotter — and pick one to fill in its position; typing
-  lat/lon directly works just as well). Every other known waypoint (not part of this
+- **Course & chart** — set the start line, an ordered list of rounding marks, and the
+  finish line by whichever's easiest: type lat/lon directly, click **Use my position**
+  if you're sitting at that spot, type a name to autocomplete against existing SignalK
+  waypoints (e.g. ones already placed from a chart plotter) and pick one to fill in its
+  position, or click **Pick on map** and then click the spot on the chart below. A
+  mark's own **Pick on map** only turns on once the start line has a position — before
+  that the chart has nothing to anchor its zoom to and is still showing the whole
+  world, not much use to click into. Every other known waypoint (not part of this
   race's own course) shows on the chart too, as a small dim pin with its name, so it's
   there to reference — or type into a mark's name field — even before it's used.
   The chart itself is a real background map, like freeboard-sk's: it uses whatever
