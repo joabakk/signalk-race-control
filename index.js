@@ -476,8 +476,13 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .status.error { color: var(--bad); }
 main { padding: 1rem 1.5rem max(2rem, env(safe-area-inset-bottom)); margin: 0 auto; }
 .add-boat-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-.add-boat-row input[type='text'] { flex: 1; min-width: 12rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+.add-boat-row input[type='text'] { width: 100%; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
 .add-boat-row input[type='number'] { width: 6rem; padding: 0.45rem 0.6rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+.autocomplete { position: relative; flex: 1; min-width: 12rem; max-width: 20rem; }
+.suggestions { position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 10; max-height: 16rem; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+.suggestions .suggestion-item { padding: 0.45rem 0.6rem; font-size: 0.85rem; cursor: pointer; color: var(--text); }
+.suggestions .suggestion-item mark { background: none; color: var(--accent); font-weight: 700; }
+.suggestions .suggestion-item:hover, .suggestions .suggestion-item.active { background: rgba(56, 189, 248, 0.15); }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; min-width: 44rem; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 thead th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
@@ -539,8 +544,10 @@ tbody tr.dnf td { color: var(--muted); }
 </header>
 <main>
   <div class="add-boat-row">
-    <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" list="addBoatSuggestions" />
-    <datalist id="addBoatSuggestions"></datalist>
+    <div class="autocomplete">
+      <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" />
+      <div id="addBoatSuggestions" class="suggestions" hidden></div>
+    </div>
     <input type="number" id="addBoatTcf" step="0.001" min="0.01" title="TCF" />
     <button id="addBoatBtn">Add Boat</button>
   </div>
@@ -749,17 +756,61 @@ tbody tr.dnf td { color: var(--muted); }
     return boats;
   }
 
+  var nameSuggestionPool = [];
+  var suggestionItems = [];
+  var suggestionActiveIndex = -1;
   function rebuildAddBoatSuggestions() {
-    addBoatSuggestions.innerHTML = '';
     var seen = {};
+    nameSuggestionPool = [];
     race.handicapBoats.concat(race.ktkBoats).forEach(function (b) {
       var key = b.name.toLowerCase();
       if (seen[key]) return;
       seen[key] = true;
-      var opt = document.createElement('option');
-      opt.value = b.name;
-      addBoatSuggestions.appendChild(opt);
+      nameSuggestionPool.push({ name: b.name });
     });
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function hideSuggestions() {
+    addBoatSuggestions.hidden = true;
+    addBoatSuggestions.innerHTML = '';
+    suggestionItems = [];
+    suggestionActiveIndex = -1;
+  }
+  function renderSuggestionActive() {
+    Array.prototype.forEach.call(addBoatSuggestions.children, function (el, i) {
+      el.classList.toggle('active', i === suggestionActiveIndex);
+    });
+  }
+  function selectSuggestion(item) {
+    addBoatName.value = item.name;
+    hideSuggestions();
+    addBoatName.focus();
+  }
+  function showSuggestionsFor(query) {
+    var q = query.trim().toLowerCase();
+    if (!q) { hideSuggestions(); return; }
+    var matches = nameSuggestionPool.filter(function (s) { return s.name.toLowerCase().indexOf(q) !== -1; }).slice(0, 20);
+    suggestionItems = matches;
+    suggestionActiveIndex = -1;
+    if (!matches.length) { hideSuggestions(); return; }
+    addBoatSuggestions.innerHTML = '';
+    matches.forEach(function (item) {
+      var div = document.createElement('div');
+      div.className = 'suggestion-item';
+      var idx = item.name.toLowerCase().indexOf(q);
+      if (idx === -1) {
+        div.textContent = item.name;
+      } else {
+        div.innerHTML = escapeHtml(item.name.slice(0, idx)) + '<mark>' + escapeHtml(item.name.slice(idx, idx + q.length)) + '</mark>' + escapeHtml(item.name.slice(idx + q.length));
+      }
+      div.addEventListener('mousedown', function (e) { e.preventDefault(); selectSuggestion(item); });
+      addBoatSuggestions.appendChild(div);
+    });
+    addBoatSuggestions.hidden = false;
   }
 
   function loadHandicapRegister(force) {
@@ -1374,9 +1425,32 @@ tbody tr.dnf td { color: var(--muted); }
     setStatus('');
     render();
   }
-  addBoatBtn.addEventListener('click', addBoat);
+  addBoatBtn.addEventListener('click', function () { hideSuggestions(); addBoat(); });
+  addBoatName.addEventListener('input', function () { showSuggestionsFor(addBoatName.value); });
+  addBoatName.addEventListener('focus', function () {
+    if (addBoatName.value.trim()) showSuggestionsFor(addBoatName.value);
+  });
+  addBoatName.addEventListener('blur', function () { hideSuggestions(); });
   addBoatName.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); addBoat(); }
+    if (e.key === 'ArrowDown' && suggestionItems.length) {
+      e.preventDefault();
+      suggestionActiveIndex = (suggestionActiveIndex + 1) % suggestionItems.length;
+      renderSuggestionActive();
+    } else if (e.key === 'ArrowUp' && suggestionItems.length) {
+      e.preventDefault();
+      suggestionActiveIndex = (suggestionActiveIndex - 1 + suggestionItems.length) % suggestionItems.length;
+      renderSuggestionActive();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (suggestionActiveIndex >= 0 && suggestionItems[suggestionActiveIndex]) {
+        selectSuggestion(suggestionItems[suggestionActiveIndex]);
+      } else {
+        hideSuggestions();
+        addBoat();
+      }
+    } else if (e.key === 'Escape') {
+      hideSuggestions();
+    }
   });
 
   downloadCsvBtn.addEventListener('click', function () {
