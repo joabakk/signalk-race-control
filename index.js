@@ -1906,7 +1906,7 @@ module.exports = function (app) {
         const live = getLivePosition(boat.mmsi);
         if (!live) return;
         if (!boat.track) boat.track = [];
-        boat.track.push({ t: Date.now(), lat: live.lat, lon: live.lon });
+        boat.track.push({ t: Date.now(), lat: live.lat, lon: live.lon, sog: live.sogMs });
         if (boat.track.length > 2000) boat.track.shift();
         changed = true;
       });

@@ -1577,6 +1577,13 @@
     // observation instead, same as before this existed.
     const MAX_INTERP_GAP_MS = 5 * 60 * 1000;
 
+    // A speed pickup between consecutive samples (gust, better trim,
+    // planing) is more useful marked right on the trace than buried in a
+    // separate speed graph. A fixed colour (not the boat's own) so it reads
+    // the same way across every trace; ring size grows a bit with how much
+    // faster, so a big jump stands out from a marginal one.
+    const SPEED_INCREASE_MS = 1.0; // m/s (~1.9 kn) between ~15s samples
+
     boatsWithTrack.forEach((b, idx) => {
       const color = CHART_PALETTE[idx % CHART_PALETTE.length];
       const pts = b.track.filter((pt) => pt.t <= cutoff);
@@ -1587,6 +1594,18 @@
         const p = proj(pt);
         parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2" fill="${color}" opacity="0.7" />`);
       });
+      for (let i = 1; i < pts.length; i++) {
+        const prevPt = pts[i - 1];
+        const pt = pts[i];
+        if (typeof prevPt.sog !== 'number' || typeof pt.sog !== 'number') continue;
+        const delta = pt.sog - prevPt.sog;
+        if (delta < SPEED_INCREASE_MS) continue;
+        const p = proj(pt);
+        const r = Math.min(4 + delta * 2, 10).toFixed(1);
+        parts.push(
+          `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="none" stroke="#facc15" stroke-width="2"><title>${escapeHtml(b.name)}: sped up to ${(pt.sog * 1.94384).toFixed(1)} kn</title></circle>`
+        );
+      }
 
       const prev = pts[pts.length - 1];
       let current = prev;

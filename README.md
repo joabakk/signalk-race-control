@@ -118,7 +118,9 @@ and a live projected finishing order — during and after the race.
   back to just the last real position (no ring) instead of interpolating across a gap
   longer than 5 minutes — AIS dropping out, or a mark rounding recorded far from any
   real fix — since a straight line across a gap that long would be a guess, not an
-  estimate. The course is also published as SignalK
+  estimate. A notable pickup in speed between two consecutive samples (a gust, better
+  trim, planing) is marked right on the track as a yellow ring, sized a bit larger for a
+  bigger jump — hover it for the exact speed reached. The course is also published as SignalK
   waypoint/route resources for any chart plotter (e.g. freeboard-sk) that reads the
   standard resources API — both directions (reading existing waypoints for the
   autocomplete, and publishing the saved course) only do anything if your server has a
