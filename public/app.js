@@ -1579,9 +1579,11 @@
 
     // A speed pickup between consecutive samples (gust, better trim,
     // planing) is more useful marked right on the trace than buried in a
-    // separate speed graph. A fixed colour (not the boat's own) so it reads
-    // the same way across every trace; ring size grows a bit with how much
-    // faster, so a big jump stands out from a marginal one.
+    // separate speed graph. Drawn in the boat's own colour (like the rest of
+    // its trace) rather than a fixed one, since a shared colour would clash
+    // with whichever boat's own palette entry happens to match it; the ring
+    // shape (unfilled, sized by how much faster) is what sets it apart from
+    // the regular sample dots and the solid current-position dot.
     const SPEED_INCREASE_MS = 1.0; // m/s (~1.9 kn) between ~15s samples
 
     boatsWithTrack.forEach((b, idx) => {
@@ -1603,7 +1605,7 @@
         const p = proj(pt);
         const r = Math.min(4 + delta * 2, 10).toFixed(1);
         parts.push(
-          `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="none" stroke="#facc15" stroke-width="2"><title>${escapeHtml(b.name)}: sped up to ${(pt.sog * 1.94384).toFixed(1)} kn</title></circle>`
+          `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="none" stroke="${color}" stroke-width="2"><title>${escapeHtml(b.name)}: sped up to ${(pt.sog * 1.94384).toFixed(1)} kn</title></circle>`
         );
       }
 
