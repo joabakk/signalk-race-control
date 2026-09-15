@@ -1576,6 +1576,28 @@ module.exports = function (app) {
   let dataFile = null;
   const scheduleTimers = new Map(); // raceId -> Timeout, for scheduledStart
   const callOffTimers = new Map(); // raceId -> Timeout, for scheduledCallOff
+
+  // setTimeout's delay is a 32-bit signed int internally — anything past
+  // ~24.8 days silently wraps and fires almost immediately instead of
+  // waiting (this bit a race scheduled weeks out: it — and, since its
+  // call-off got armed right after, that too — fired within moments of
+  // being scheduled, leaving the race already stopped/DNF'd). This chains
+  // multiple max-length timeouts instead of one long one, re-checking the
+  // actual remaining delay each time it fires so it also self-corrects
+  // for clock changes over a long wait; `timers` is keyed by raceId so
+  // disarming always clears whichever leg of the chain is currently
+  // pending, the same way a single setTimeout's handle would.
+  const MAX_TIMEOUT_MS = 2147483647;
+  function scheduleAt(timers, raceId, atTime, fn) {
+    const delay = Math.min(Math.max(atTime - Date.now(), 0), MAX_TIMEOUT_MS);
+    timers.set(
+      raceId,
+      setTimeout(() => {
+        if (Date.now() >= atTime) fn();
+        else scheduleAt(timers, raceId, atTime, fn);
+      }, delay)
+    );
+  }
   let handicapCache = { fetchedAt: 0, boats: [], sourceUrl: null, csvUrl: null };
   let ktkCache = { fetchedAt: 0, boats: [], sourceUrl: null };
 
@@ -1978,14 +2000,10 @@ module.exports = function (app) {
   function armSchedule(race) {
     disarmSchedule(race.id);
     if (race.scheduledStart && !race.startTime) {
-      const delay = race.scheduledStart - Date.now();
-      if (delay <= 0) {
+      if (race.scheduledStart - Date.now() <= 0) {
         doStart(race, race.scheduledStart);
       } else {
-        scheduleTimers.set(
-          race.id,
-          setTimeout(() => doStart(race, race.scheduledStart), delay)
-        );
+        scheduleAt(scheduleTimers, race.id, race.scheduledStart, () => doStart(race, race.scheduledStart));
       }
     }
   }
@@ -2038,14 +2056,10 @@ module.exports = function (app) {
   function armCallOffSchedule(race) {
     disarmCallOffSchedule(race.id);
     if (race.scheduledCallOff && race.startTime && !race.stopTime) {
-      const delay = race.scheduledCallOff - Date.now();
-      if (delay <= 0) {
+      if (race.scheduledCallOff - Date.now() <= 0) {
         doStop(race, race.scheduledCallOff);
       } else {
-        callOffTimers.set(
-          race.id,
-          setTimeout(() => doStop(race, race.scheduledCallOff), delay)
-        );
+        scheduleAt(callOffTimers, race.id, race.scheduledCallOff, () => doStop(race, race.scheduledCallOff));
       }
     }
   }
