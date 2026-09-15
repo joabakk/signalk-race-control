@@ -509,6 +509,7 @@ tbody tr.dnf td { color: var(--muted); }
 .vs-self .self-tag { font-size: 0.7rem; letter-spacing: 0.04em; color: var(--muted); font-style: italic; }
 .finish-cell { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
 .finish-time-input, .start-time-input { padding: 0.3rem 0.4rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-variant-numeric: tabular-nums; }
+.start-time-input.inherited-value { color: var(--muted); font-style: italic; }
 .finish-now-btn, .finish-clear-btn, .finish-dnf-btn, .undo-dnf-btn, .remove-boat-btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; background: transparent; color: var(--text); }
 .finish-dnf-btn { border-color: var(--bad); color: var(--bad); }
 .dnf-pos { display: block; font-size: 0.7rem; color: var(--muted); }
@@ -1367,9 +1368,15 @@ tbody tr.dnf td { color: var(--muted); }
         }
         syncVetSelectValue(row, b.tcf);
       }
+      // See the equivalent block in app.js's render() — a boat with no
+      // start time of its own already starts with the fleet, so the
+      // input shows the inherited race start time (dimmed) instead of
+      // blank, without turning it into a real per-boat override.
+      var effectiveStart = b.startTime != null ? b.startTime : race.startTime;
       if (document.activeElement !== row.startTimeInput) {
-        row.startTimeInput.value = race.multiDay ? tsToDateTimeInputValue(b.startTime) : tsToTimeInputValue(b.startTime);
+        row.startTimeInput.value = race.multiDay ? tsToDateTimeInputValue(effectiveStart) : tsToTimeInputValue(effectiveStart);
       }
+      row.startTimeInput.classList.toggle('inherited-value', b.startTime == null && race.startTime != null);
       var canStart = !!race.startTime;
       row.startTimeInput.disabled = !canStart;
       row.startNowBtn.disabled = !canStart;

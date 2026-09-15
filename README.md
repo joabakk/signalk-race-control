@@ -19,9 +19,11 @@ and a live projected finishing order — during and after the race.
 - **Individual start times** — override the race's single start time for one boat at
   a time (in its own **Start time** column, right next to Finish time): for a
   staggered/pursuit start, or to correct a boat that didn't actually get away with
-  the fleet. Left blank, a boat just uses the race's own start time as before.
-  Starting or resetting the race clears every boat's override along with its finish
-  time, ready for a clean re-run.
+  the fleet. Left blank, a boat just uses the race's own start time — shown there in
+  a dimmed/italic style once the race starts, so it reads as "racing, using the fleet
+  start" rather than as not having started; setting its own time (or clicking **Now**)
+  switches it to a real override, shown normally. Starting or resetting the race clears
+  every boat's override along with its finish time, ready for a clean re-run.
 - **Add/remove boats explicitly** — type a name (autocompletes against the VET
   register, the cross-race boat registry, and any live AIS/self vessel — matching
   anywhere in the name, not just the start) and click **Add Boat**. Boats aren't

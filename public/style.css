@@ -120,6 +120,13 @@ button.confirming {
   font-variant-numeric: tabular-nums;
 }
 
+/* Shows the race's own start time when this boat has no override of its
+   own — dimmed to mark it as inherited, not a boat-specific start. */
+.start-time-input.inherited-value {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .controls {
   margin-top: 0.75rem;
   display: flex;

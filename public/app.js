@@ -2400,9 +2400,21 @@
         row.vetHandicapVersion = handicapVersion;
       }
       syncVetSelectValue(row, b.tcf);
+      // A boat with no start time of its own already starts with the
+      // fleet — effectiveStartTime (server-side) falls back to the race's
+      // own start time, and elapsed/corrected already reflect that. The
+      // input showing blank instead of that time made it look like the
+      // boat hadn't started at all even while it was actively being
+      // timed; showing the inherited value (dimmed, to mark it as
+      // inherited rather than a boat-specific override) fixes that
+      // without changing what's actually stored — only "Now" or typing a
+      // value turns it into a real per-boat override (e.g. a pursuit
+      // start), same as before.
+      const effectiveStart = b.startTime != null ? b.startTime : raceState.startTime;
       if (document.activeElement !== row.startTimeInput) {
-        row.startTimeInput.value = raceState.multiDay ? tsToDateTimeInputValue(b.startTime) : tsToTimeInputValue(b.startTime);
+        row.startTimeInput.value = raceState.multiDay ? tsToDateTimeInputValue(effectiveStart) : tsToTimeInputValue(effectiveStart);
       }
+      row.startTimeInput.classList.toggle('inherited-value', b.startTime == null && raceState.startTime != null);
       const canStart = !!raceState.startTime;
       row.startTimeInput.disabled = !canStart;
       row.startNowBtn.disabled = !canStart;
