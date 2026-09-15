@@ -1612,11 +1612,20 @@
     return chartMap;
   }
 
-  // Prefers whatever tile-based chart resource this SignalK server has
+  // Prefers whatever tile-based chart resource(s) this SignalK server has
   // registered (e.g. a locally cached raster chart) — same as freeboard-sk
-  // itself would use. Falls back to public OpenStreetMap + OpenSeaMap
-  // tiles when none is configured, which is also freeboard-sk's own
-  // fallback with no chart provider installed.
+  // itself would use. Falls back to public OpenStreetMap tiles when none
+  // is configured, which is also freeboard-sk's own fallback with no
+  // chart provider installed. When more than one chart is registered
+  // they're offered as alternative base layers (only one shown at a time,
+  // picked via the layer control) rather than stacked on top of each
+  // other — stacking silently buried whichever chart happened to load
+  // last under whatever loaded after it, e.g. a plain street map with no
+  // navigation aids covering an actual nautical chart underneath it.
+  // OpenSeaMap's navigation-aids overlay (buoys, lights, marks) is always
+  // offered too, on top of whichever base is active, since a registered
+  // chart isn't guaranteed to already include them the way Kartverket's
+  // does.
   async function addChartBaseLayers(map) {
     let tileCharts = [];
     try {
@@ -1625,6 +1634,7 @@
     } catch (e) {
       tileCharts = [];
     }
+    const baseLayers = {};
     if (tileCharts.length) {
       tileCharts.forEach((c) => {
         const opts = { maxZoom: c.maxzoom || 19, minZoom: c.minzoom || 0, attribution: c.name || '' };
@@ -1634,17 +1644,25 @@
             [c.bounds[3], c.bounds[2]]
           ];
         }
-        L.tileLayer(c.url, opts).addTo(map);
+        baseLayers[c.name || c.id] = L.tileLayer(c.url, opts);
       });
     } else {
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      baseLayers['OpenStreetMap'] = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      }).addTo(map);
-      L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+      });
+    }
+    Object.values(baseLayers)[0].addTo(map);
+
+    const overlays = {
+      'Navigation aids (OpenSeaMap)': L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
         maxZoom: 18,
         attribution: '&copy; <a href="https://www.openseamap.org">OpenSeaMap</a>'
-      }).addTo(map);
+      }).addTo(map)
+    };
+
+    if (Object.keys(baseLayers).length > 1 || Object.keys(overlays).length) {
+      L.control.layers(baseLayers, overlays, { collapsed: true }).addTo(map);
     }
   }
 

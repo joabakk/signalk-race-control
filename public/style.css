@@ -460,6 +460,20 @@ main {
   opacity: 0.85;
 }
 
+.chart-map .leaflet-control-layers {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.chart-map .leaflet-control-layers-toggle {
+  filter: invert(1);
+}
+
+.chart-map .leaflet-control-layers label {
+  color: var(--text);
+}
+
 .replay-controls {
   margin-top: 0.5rem;
   display: flex;
