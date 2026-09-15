@@ -631,6 +631,13 @@ main {
   font-weight: 700;
 }
 
+.suggestions .suggestion-item .suggestion-source {
+  float: right;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .suggestions .suggestion-item:hover,
 .suggestions .suggestion-item.active {
   background: rgba(56, 189, 248, 0.15);

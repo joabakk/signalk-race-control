@@ -1072,15 +1072,24 @@
   // instances (one per course point row) can coexist without stepping on
   // each other the way sharing the boat autocomplete's module-level state
   // would.
-  function attachAutocomplete(input, dropdown, getPool, onSelect) {
+  // getExtra (optional) — async (query) => [{name, lat, lon, source}] —
+  // supplements getPool's synchronous, immediate matches with a slower
+  // source merged in once it resolves (used for the course-point rows'
+  // live OpenStreetMap search; see searchOsmPlaces). Debounced on its own
+  // so the instant local matches aren't held up waiting for it, and
+  // request-numbered so a slow older lookup can't clobber a newer one.
+  function attachAutocomplete(input, dropdown, getPool, onSelect, getExtra) {
     let items = [];
     let activeIndex = -1;
+    let extraRequestId = 0;
+    let extraDebounceTimer = null;
 
     function hide() {
       dropdown.hidden = true;
       dropdown.innerHTML = '';
       items = [];
       activeIndex = -1;
+      clearTimeout(extraDebounceTimer);
     }
     function renderActive() {
       Array.from(dropdown.children).forEach((el, i) => el.classList.toggle('active', i === activeIndex));
@@ -1089,15 +1098,7 @@
       onSelect(item);
       hide();
     }
-    function showFor(query) {
-      const q = query.trim().toLowerCase();
-      if (!q) {
-        hide();
-        return;
-      }
-      const matches = getPool()
-        .filter((it) => it.name.toLowerCase().includes(q))
-        .slice(0, 20);
+    function renderMatches(matches, q) {
       items = matches;
       activeIndex = -1;
       if (!matches.length) {
@@ -1119,6 +1120,7 @@
             '</mark>' +
             escapeHtml(item.name.slice(idx + q.length));
         }
+        if (item.source === 'osm') div.innerHTML += '<span class="suggestion-source">from chart</span>';
         // mousedown (not click) fires before the input's blur, same reason
         // as the boat-name suggestions above.
         div.addEventListener('mousedown', (e) => {
@@ -1128,6 +1130,30 @@
         dropdown.appendChild(div);
       });
       dropdown.hidden = false;
+    }
+    function showFor(query) {
+      const q = query.trim().toLowerCase();
+      clearTimeout(extraDebounceTimer);
+      if (!q) {
+        hide();
+        return;
+      }
+      const localMatches = getPool()
+        .filter((it) => it.name.toLowerCase().includes(q))
+        .slice(0, 20);
+      renderMatches(localMatches, q);
+      if (!getExtra) return;
+      extraDebounceTimer = setTimeout(() => {
+        const requestId = ++extraRequestId;
+        getExtra(query)
+          .then((extraItems) => {
+            if (requestId !== extraRequestId || !extraItems || !extraItems.length) return;
+            const seen = new Set(localMatches.map((m) => m.name.toLowerCase()));
+            const merged = localMatches.concat(extraItems.filter((it) => !seen.has(it.name.toLowerCase()))).slice(0, 20);
+            renderMatches(merged, q);
+          })
+          .catch(() => {});
+      }, 400);
     }
 
     input.addEventListener('input', () => showFor(input.value));
@@ -1151,6 +1177,32 @@
         hide();
       }
     });
+  }
+
+  // Best-effort: searches OpenStreetMap for real charted place names
+  // within the chart's current visible area (bounded=1 — a real search,
+  // not just weighted toward that area, so a name only means something in
+  // the fleet's own waters, not wherever else it happens to exist). Used
+  // to supplement the course editor's waypoint autocomplete so a mark can
+  // be named after somewhere real (a headland, a skerry) by typing it,
+  // even before any waypoint for it exists. Silently returns nothing on
+  // any failure or when the chart hasn't been created yet (course section
+  // not expanded) — same spirit as the reverse-geocode name suggestion.
+  async function searchOsmPlaces(query) {
+    const q = query.trim();
+    if (!q || !chartMap) return [];
+    try {
+      const b = chartMap.getBounds();
+      const viewbox = `${b.getWest()},${b.getNorth()},${b.getEast()},${b.getSouth()}`;
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&viewbox=${viewbox}&bounded=1&limit=8`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || [])
+        .filter((r) => r.name)
+        .map((r) => ({ name: r.name, lat: parseFloat(r.lat), lon: parseFloat(r.lon), source: 'osm' }));
+    } catch (e) {
+      return [];
+    }
   }
 
   // One name+lat+lon+position-button row, shared by start line, finish
@@ -1253,7 +1305,8 @@
         latInput.value = wp.lat;
         lonInput.value = wp.lon;
         notifyPositionChanged();
-      }
+      },
+      searchOsmPlaces
     );
 
     updatePosBtnLabel();
