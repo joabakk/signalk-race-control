@@ -128,7 +128,10 @@ and a live projected finishing order — during and after the race.
   public OpenStreetMap tiles when none is configured (same fallback freeboard-sk itself
   uses). Registering more than one chart offers them as alternative base layers via the
   layer switcher (top right of the map) rather than stacking them all at once — a plain
-  street map on top would otherwise bury a real nautical chart underneath it. OpenSeaMap's
+  street map on top would otherwise bury a real nautical chart underneath it. When one of
+  them is Eniro's plain map (not "Eniro sjø"), that's the one shown by default — the
+  easiest to actually read at a glance; otherwise it's whichever one loaded first.
+  OpenSeaMap's
   navigation aids (buoys, lights, marks) are offered there too, as an overlay on top of
   whichever base chart is active, on by default. Overlaid on all of that is each
   AIS-tracked boat's recorded track for the current race — drag the **replay** slider to

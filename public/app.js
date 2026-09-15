@@ -1762,6 +1762,7 @@
       tileCharts = [];
     }
     const baseLayers = {};
+    let defaultKey = null;
     if (tileCharts.length) {
       tileCharts.forEach((c) => {
         const opts = { maxZoom: c.maxzoom || 19, minZoom: c.minzoom || 0, attribution: c.name || '' };
@@ -1771,7 +1772,13 @@
             [c.bounds[3], c.bounds[2]]
           ];
         }
-        baseLayers[c.name || c.id] = L.tileLayer(c.url, opts);
+        const key = c.name || c.id;
+        baseLayers[key] = L.tileLayer(c.url, opts);
+        // Eniro's plain map (not "Eniro sjø", and not Kartverket/Hitta,
+        // which both render very dark) is the easiest one to actually
+        // read at a glance — preferred as the default when it's
+        // registered, same as any other order these come back in.
+        if ((c.id || '').toLowerCase() === 'eniro') defaultKey = key;
       });
     } else {
       baseLayers['OpenStreetMap'] = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1779,7 +1786,7 @@
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       });
     }
-    Object.values(baseLayers)[0].addTo(map);
+    baseLayers[defaultKey || Object.keys(baseLayers)[0]].addTo(map);
 
     const overlays = {
       'Navigation aids (OpenSeaMap)': L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
