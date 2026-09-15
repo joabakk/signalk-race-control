@@ -109,8 +109,11 @@ and a live projected finishing order — during and after the race.
   "OpenSeaMap" to tell it apart from a saved waypoint) — and pick one to fill in its
   position, or use the position button — it reads **Pick on
   map** while that point is still unset (arm it, then click the spot on the chart
-  below), and switches to **Use my position** once it has one, to re-centre it on
-  wherever you are right now instead. Setting a position this way (map click or self
+  below — a click is rarely pixel-perfect on the actual mark, so if there's a real
+  navigation aid within 30m of wherever was clicked, it asks whether to snap to that
+  aid's exact position and name instead of the raw click), and switches to **Use my
+  position** once it has one, to re-centre it on wherever you are right now instead.
+  Setting a position this way (map click or self
   position — not while still typing lat/lon by hand) also suggests a name for it from
   OpenStreetMap, when there's a real charted place right there and the name field is
   still empty; typing or picking a waypoint always wins over the suggestion. A mark's

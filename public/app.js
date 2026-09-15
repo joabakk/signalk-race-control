@@ -1190,6 +1190,44 @@
   // nothing on any failure, timeout, or when the chart hasn't been
   // created yet (course section not expanded) — same spirit as the
   // reverse-geocode name suggestion.
+  // Public Overpass mirrors are individually flaky (rate limits, regional-
+  // only data, outages) — tried one at a time, in order, falling through
+  // to the next on any failure or timeout. Deliberately sequential, not
+  // raced in parallel: a fast mirror with an incomplete regional extract
+  // would otherwise "win" with a confident-looking empty result and mask
+  // a real answer a fuller (but slower) mirror would have found. Returns
+  // [] if every mirror fails.
+  const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass.osm.ch/api/interpreter'];
+  async function queryOverpass(overpassQuery) {
+    for (const base of OVERPASS_ENDPOINTS) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 7000);
+      try {
+        const res = await fetch(`${base}?data=${encodeURIComponent(overpassQuery)}`, { signal: controller.signal });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data && Array.isArray(data.elements)) return data.elements;
+      } catch (e) {
+        // try the next endpoint
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return [];
+  }
+
+  function seamarkElementsToResults(elements) {
+    const seen = new Set();
+    const results = [];
+    elements.forEach((el) => {
+      const name = el.tags && (el.tags['seamark:name'] || el.tags.name);
+      if (!name || typeof el.lat !== 'number' || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      results.push({ name, lat: el.lat, lon: el.lon, source: 'osm' });
+    });
+    return results;
+  }
+
   async function searchOsmPlaces(query) {
     const q = query.trim();
     if (!q || !chartMap) return [];
@@ -1197,28 +1235,35 @@
     const b = chartMap.getBounds();
     const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
     const overpassQuery =
-      `[out:json][timeout:8];(node["seamark:type"]["seamark:name"~"${escaped}",i](${bbox});` +
+      `[out:json][timeout:9];(node["seamark:type"]["seamark:name"~"${escaped}",i](${bbox});` +
       `node["seamark:type"]["name"~"${escaped}",i](${bbox}););out body 8;`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(`https://overpass.kumi.systems/api/interpreter?data=${encodeURIComponent(overpassQuery)}`, { signal: controller.signal });
-      if (!res.ok) return [];
-      const data = await res.json();
-      const seen = new Set();
-      const results = [];
-      (data.elements || []).forEach((el) => {
-        const name = el.tags && (el.tags['seamark:name'] || el.tags.name);
-        if (!name || typeof el.lat !== 'number' || seen.has(name.toLowerCase())) return;
-        seen.add(name.toLowerCase());
-        results.push({ name, lat: el.lat, lon: el.lon, source: 'osm' });
-      });
-      return results;
-    } catch (e) {
-      return [];
-    } finally {
-      clearTimeout(timer);
-    }
+    return seamarkElementsToResults(await queryOverpass(overpassQuery));
+  }
+
+  // Used right after a map click: is there a real charted navigation aid
+  // within snapping distance of wherever was clicked? A click is rarely
+  // pixel-perfect on the actual mark, so offering to snap to the nearest
+  // one (rather than silently using the imprecise raw click) means the
+  // recorded position is exactly right when there's something real there
+  // to be exact about.
+  const SNAP_RADIUS_M = 30;
+  async function findNearbySeamark(lat, lon) {
+    if (!chartMap) return null;
+    const overpassQuery = `[out:json][timeout:9];node(around:${SNAP_RADIUS_M},${lat},${lon})["seamark:type"];out body 5;`;
+    const elements = await queryOverpass(overpassQuery);
+    const candidates = seamarkElementsToResults(elements);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => distanceMeters(lat, lon, a.lat, a.lon) - distanceMeters(lat, lon, b.lat, b.lon));
+    return candidates[0];
+  }
+
+  function distanceMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad;
+    const dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
   }
 
   // One name+lat+lon+position-button row, shared by start line, finish
@@ -1298,7 +1343,7 @@
         if (mapPickTarget && mapPickTarget.btn === posBtn) {
           cancelMapPick();
         } else {
-          armMapPick(latInput, lonInput, posBtn, nameInput.placeholder || 'this point', handlePositionSet);
+          armMapPick(latInput, lonInput, nameInput, posBtn, nameInput.placeholder || 'this point', handlePositionSet);
         }
         return;
       }
@@ -1353,9 +1398,9 @@
   // Arms "pick on map" mode: the next click on the chart fills this row's
   // lat/lon from wherever was clicked. Clicking the same button again, a
   // different row's pick button, or Escape all cancel it.
-  function armMapPick(latInput, lonInput, btn, label, onPositionChanged) {
+  function armMapPick(latInput, lonInput, nameInput, btn, label, onPositionChanged) {
     cancelMapPick();
-    mapPickTarget = { latInput, lonInput, btn, onPositionChanged };
+    mapPickTarget = { latInput, lonInput, nameInput, btn, onPositionChanged };
     btn.classList.add('active');
     courseChart.classList.add('picking');
     setCourseStatus(`Click the map below to place "${label}".`);
@@ -1670,12 +1715,25 @@
     chartMap = L.map(courseChart, { attributionControl: true }).setView([0, 0], 2);
     chartLayerGroup = L.layerGroup().addTo(chartMap);
     addChartBaseLayers(chartMap);
-    chartMap.on('click', (e) => {
+    chartMap.on('click', async (e) => {
       if (!mapPickTarget) return;
       const target = mapPickTarget;
-      target.latInput.value = e.latlng.lat.toFixed(6);
-      target.lonInput.value = e.latlng.lng.toFixed(6);
+      const clickedLat = e.latlng.lat;
+      const clickedLon = e.latlng.lng;
+      target.latInput.value = clickedLat.toFixed(6);
+      target.lonInput.value = clickedLon.toFixed(6);
       cancelMapPick();
+      if (target.onPositionChanged) target.onPositionChanged();
+
+      // A click is rarely pixel-perfect on the actual mark — if there's a
+      // real charted navigation aid right where this one landed, ask
+      // before quietly using the imprecise raw click instead.
+      const nearby = await findNearbySeamark(clickedLat, clickedLon);
+      if (!nearby) return;
+      if (!confirm(`Snap to nearby mark "${nearby.name}"?`)) return;
+      target.latInput.value = nearby.lat.toFixed(6);
+      target.lonInput.value = nearby.lon.toFixed(6);
+      if (target.nameInput && !target.nameInput.value.trim()) target.nameInput.value = nearby.name;
       if (target.onPositionChanged) target.onPositionChanged();
     });
     return chartMap;
