@@ -104,9 +104,10 @@ and a live projected finishing order — during and after the race.
 - **Course & chart** — set the start line, an ordered list of rounding marks, and the
   finish line by whichever's easiest: type lat/lon directly, type a name to autocomplete
   against existing SignalK waypoints (e.g. ones already placed from a chart plotter) — or
-  a real charted place name, searched live on OpenStreetMap within whatever area the
-  chart is currently showing (tagged "from chart" to tell it apart from a saved
-  waypoint) — and pick one to fill in its position, or use the position button — it reads **Pick on
+  a real navigation aid's name (a buoy, beacon, light, mark — OpenSeaMap's own data,
+  searched live) within whatever area the chart is currently showing (tagged
+  "OpenSeaMap" to tell it apart from a saved waypoint) — and pick one to fill in its
+  position, or use the position button — it reads **Pick on
   map** while that point is still unset (arm it, then click the spot on the chart
   below), and switches to **Use my position** once it has one, to re-centre it on
   wherever you are right now instead. Setting a position this way (map click or self

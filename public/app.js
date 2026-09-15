@@ -1120,7 +1120,7 @@
             '</mark>' +
             escapeHtml(item.name.slice(idx + q.length));
         }
-        if (item.source === 'osm') div.innerHTML += '<span class="suggestion-source">from chart</span>';
+        if (item.source === 'osm') div.innerHTML += '<span class="suggestion-source">OpenSeaMap</span>';
         // mousedown (not click) fires before the input's blur, same reason
         // as the boat-name suggestions above.
         div.addEventListener('mousedown', (e) => {
@@ -1179,29 +1179,45 @@
     });
   }
 
-  // Best-effort: searches OpenStreetMap for real charted place names
-  // within the chart's current visible area (bounded=1 — a real search,
-  // not just weighted toward that area, so a name only means something in
-  // the fleet's own waters, not wherever else it happens to exist). Used
-  // to supplement the course editor's waypoint autocomplete so a mark can
-  // be named after somewhere real (a headland, a skerry) by typing it,
-  // even before any waypoint for it exists. Silently returns nothing on
-  // any failure or when the chart hasn't been created yet (course section
-  // not expanded) — same spirit as the reverse-geocode name suggestion.
+  // Best-effort: searches OpenSeaMap's own underlying data — OSM's
+  // seamark:* tags, the same data its tiles are rendered from, queried
+  // via the Overpass API — for named navigation aids (buoys, beacons,
+  // lights, marks) within the chart's current visible area. Used to
+  // supplement the course editor's waypoint autocomplete: a rounding mark
+  // is far more likely to already be a real charted navigation aid than
+  // an arbitrary place name, so this is scoped to seamark:type features
+  // specifically rather than OSM place names in general. Silently returns
+  // nothing on any failure, timeout, or when the chart hasn't been
+  // created yet (course section not expanded) — same spirit as the
+  // reverse-geocode name suggestion.
   async function searchOsmPlaces(query) {
     const q = query.trim();
     if (!q || !chartMap) return [];
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const b = chartMap.getBounds();
+    const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+    const overpassQuery =
+      `[out:json][timeout:8];(node["seamark:type"]["seamark:name"~"${escaped}",i](${bbox});` +
+      `node["seamark:type"]["name"~"${escaped}",i](${bbox}););out body 8;`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
-      const b = chartMap.getBounds();
-      const viewbox = `${b.getWest()},${b.getNorth()},${b.getEast()},${b.getSouth()}`;
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&viewbox=${viewbox}&bounded=1&limit=8`);
+      const res = await fetch(`https://overpass.kumi.systems/api/interpreter?data=${encodeURIComponent(overpassQuery)}`, { signal: controller.signal });
       if (!res.ok) return [];
       const data = await res.json();
-      return (data || [])
-        .filter((r) => r.name)
-        .map((r) => ({ name: r.name, lat: parseFloat(r.lat), lon: parseFloat(r.lon), source: 'osm' }));
+      const seen = new Set();
+      const results = [];
+      (data.elements || []).forEach((el) => {
+        const name = el.tags && (el.tags['seamark:name'] || el.tags.name);
+        if (!name || typeof el.lat !== 'number' || seen.has(name.toLowerCase())) return;
+        seen.add(name.toLowerCase());
+        results.push({ name, lat: el.lat, lon: el.lon, source: 'osm' });
+      });
+      return results;
     } catch (e) {
       return [];
+    } finally {
+      clearTimeout(timer);
     }
   }
 
