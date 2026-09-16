@@ -142,11 +142,23 @@
       </div>
     </div>
 
+    <div id="classSection" class="course-section" hidden>
+      <button id="classToggleBtn" type="button" class="link-btn">▸ Classes (staggered starts)</button>
+      <div id="classBody" hidden>
+        <div id="classRows"></div>
+        <div class="add-class-row">
+          <input type="text" id="addClassName" placeholder="Class name, e.g. Cruisers" autocomplete="off" />
+          <button id="addClassBtn" type="button" class="secondary">+ Add Class</button>
+        </div>
+      </div>
+    </div>
+
     <div id="addBoatRow" class="add-boat-row" hidden>
       <div class="autocomplete">
         <input type="text" id="addBoatName" placeholder="Add boat by name…" autocomplete="off" />
         <div id="addBoatSuggestions" class="suggestions" hidden></div>
       </div>
+      <select id="addBoatClass" class="class-select" title="Class"></select>
       <button id="addBoatBtn">Add Boat</button>
     </div>
     <div class="table-scroll">
@@ -158,6 +170,7 @@
             <th>MMSI</th>
             <th>TCF</th>
             <th id="vetAlternativesTh">Handicap alternatives</th>
+            <th>Class</th>
             <th>Start time</th>
             <th>Elapsed</th>
             <th>Corrected</th>

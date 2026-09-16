@@ -275,6 +275,10 @@ function makeBoatId() {
   return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+function makeClassId() {
+  return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
 function raceSummary(race) {
   const boats = Object.values(race.boats);
   return {
@@ -301,6 +305,10 @@ function ensureRaceShape(race) {
   if (race.stopTime === undefined) race.stopTime = null;
   if (race.scheduledCallOff === undefined) race.scheduledCallOff = null;
   if (race.multiDay === undefined) race.multiDay = false;
+  if (!race.classes) race.classes = [];
+  race.classes.forEach((c) => {
+    if (c.startTime === undefined) c.startTime = null;
+  });
   Object.values(race.boats).forEach((b) => {
     if (!b.track) b.track = [];
     if (b.dnf === undefined) b.dnf = false;
@@ -308,16 +316,32 @@ function ensureRaceShape(race) {
     if (b.dnfPosition === undefined) b.dnfPosition = null;
     if (b.startTime === undefined) b.startTime = null;
     if (b.sailNumber === undefined) b.sailNumber = null;
+    if (b.classId === undefined) b.classId = null;
     if (!b.markTimes) b.markTimes = {};
+  });
+  // A boat's classId can go stale (its class got deleted) — rather than
+  // check for that everywhere a class is looked up, just clear it here so
+  // every other boat.classId in memory is always either null or a real
+  // class.
+  const classIds = new Set(race.classes.map((c) => c.id));
+  Object.values(race.boats).forEach((b) => {
+    if (b.classId && !classIds.has(b.classId)) b.classId = null;
   });
 }
 
-// A boat with its own start time (a staggered/pursuit start, or a
-// correction for a boat that didn't actually start with the fleet) uses
-// that instead of the race's single start time — everyone else still just
-// uses race.startTime, unchanged from before this existed.
+function findClass(race, classId) {
+  return (race.classes || []).find((c) => c.id === classId) || null;
+}
+
+// A boat's own start time (a per-boat correction) wins if set; otherwise
+// its class's start time (a staggered/pursuit start by class) if it's in
+// one and that class has its own start time set; otherwise the race's
+// single start time, same as before either of those existed.
 function effectiveStartTime(race, boat) {
-  return boat.startTime != null ? boat.startTime : race.startTime;
+  if (boat.startTime != null) return boat.startTime;
+  const cls = boat.classId ? findClass(race, boat.classId) : null;
+  if (cls && cls.startTime != null) return cls.startTime;
+  return race.startTime;
 }
 
 const EARTH_RADIUS_NM = 3440.065;
@@ -2429,6 +2453,9 @@ module.exports = function (app) {
       race.scheduledStart = null;
       race.stopTime = null;
       race.scheduledCallOff = null;
+      (race.classes || []).forEach((c) => {
+        c.startTime = null;
+      });
       Object.values(race.boats).forEach((b) => {
         b.finishTime = null;
         b.startTime = null;
@@ -2579,6 +2606,8 @@ module.exports = function (app) {
       if (!isHandicapRegisterMatch(name) && registryEntry && registryEntry.tcf != null) {
         tcf = registryEntry.tcf;
       }
+      const givenClassId = ((req.body && req.body.classId) || '').toString().trim();
+      const classId = givenClassId && findClass(race, givenClassId) ? givenClassId : null;
       const boat = {
         id: makeBoatId(),
         name,
@@ -2587,6 +2616,7 @@ module.exports = function (app) {
         tcf,
         finishTime: null,
         startTime: null,
+        classId,
         track: [],
         dnf: false,
         dns: false,
@@ -2607,6 +2637,88 @@ module.exports = function (app) {
       maybeAutoStop(race);
       saveState();
       res.json({ ok: true });
+    });
+
+    // Classes group boats for a staggered start by class (e.g. "Cruisers
+    // start at 12:00, Racers at 12:15") — an alternative to setting every
+    // boat's own start time by hand. A boat's own start time (if it has
+    // one) still wins over its class's, same as it already won over the
+    // race's single start time — see effectiveStartTime.
+    router.post('/races/:id/classes', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const name = ((req.body && req.body.name) || '').trim();
+      if (!name) return res.status(400).json({ error: 'name is required' });
+      ensureRaceShape(race);
+      const cls = { id: makeClassId(), name, startTime: null };
+      race.classes.push(cls);
+      saveState();
+      res.json(raceWithEstimates(race));
+    });
+
+    router.put('/races/:id/classes/:classId', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      ensureRaceShape(race);
+      const cls = findClass(race, req.params.classId);
+      if (!cls) return res.status(404).json({ error: 'No such class' });
+      if ('name' in (req.body || {})) {
+        const name = (req.body.name || '').trim();
+        if (!name) return res.status(400).json({ error: 'name cannot be empty' });
+        cls.name = name;
+      }
+      saveState();
+      res.json(raceWithEstimates(race));
+    });
+
+    // Sets (or, with startTime: null, clears) this class's own start time —
+    // same pattern as a boat's own start time.
+    router.put('/races/:id/classes/:classId/startTime', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      ensureRaceShape(race);
+      const cls = findClass(race, req.params.classId);
+      if (!cls) return res.status(404).json({ error: 'No such class' });
+      const raw = req.body ? req.body.startTime : undefined;
+      if (raw === null) {
+        cls.startTime = null;
+      } else {
+        const t = Number(raw);
+        if (!isFinite(t) || t <= 0) {
+          return res.status(400).json({ error: 'startTime must be an epoch-millisecond timestamp or null' });
+        }
+        cls.startTime = t;
+      }
+      saveState();
+      res.json(raceWithEstimates(race));
+    });
+
+    router.delete('/races/:id/classes/:classId', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      ensureRaceShape(race);
+      if (!findClass(race, req.params.classId)) return res.status(404).json({ error: 'No such class' });
+      race.classes = race.classes.filter((c) => c.id !== req.params.classId);
+      Object.values(race.boats).forEach((b) => {
+        if (b.classId === req.params.classId) b.classId = null;
+      });
+      saveState();
+      res.json(raceWithEstimates(race));
+    });
+
+    // Sets (or, with classId: null, clears) a boat's class.
+    router.put('/races/:id/boats/:boatId/class', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      const boat = getBoat(race, req.params.boatId);
+      if (!boat) return res.status(404).json({ error: 'No such boat' });
+      const classId = (req.body || {}).classId;
+      if (classId != null && !findClass(race, classId)) {
+        return res.status(400).json({ error: 'No such class' });
+      }
+      boat.classId = classId || null;
+      saveState();
+      res.json(boat);
     });
 
     // Sets (or, with finishTime: null, clears) a boat's finish time to an

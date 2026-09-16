@@ -268,7 +268,14 @@ Then restart the SignalK server, enable "Race Control" under
    boat if you want its AIS position tracked for the chart/estimate.
 3. Optionally expand **Course & chart** and enter the start line, marks (in rounding
    order — reorder with ↑/↓), and finish line, then **Save Course**.
-4. Either click **Start Race** now, or set a date/time and click **Schedule Start** —
+4. For a staggered/pursuit start, optionally expand **Classes (staggered starts)** and
+   add a class per start group (e.g. "Cruisers", "Spinnaker"). Assign each boat to a
+   class from the dropdown in its row (or when adding it), then give each class its own
+   start time (Now, once the race has started, or type one directly). A boat with no
+   class assigned — or a class with no start time set yet — falls back to the race's own
+   start time, same as before classes existed. A boat's own **Start time** override (for
+   an individual correction) still wins over either.
+5. Either click **Start Race** now, or set a date/time and click **Schedule Start** —
    the race starts itself automatically at that moment (even across a server restart).
    A real date's always needed here regardless of a single- vs. multi-day race, since a
    start is often scheduled well ahead of race day itself.
@@ -278,22 +285,23 @@ Then restart the SignalK server, enable "Race Control" under
    started at a different moment (a staggered/pursuit start, or a correction), set
    its own time in the **Start time** column instead of leaving it to follow the
    race's start.
-5. As boats finish, click **Now** to stamp the current time, or type the exact time
+6. As boats finish, click **Now** to stamp the current time, or type the exact time
    (plus date, for a multi-day race) into the finish-time field. **Clear** undoes a
    finish.
-6. **Stop** calls the race off now (freezes the clock, DNFs whoever hasn't finished);
+7. **Stop** calls the race off now (freezes the clock, DNFs whoever hasn't finished);
    **Schedule Call-off** does the same at a future time instead. **Resume** discards
    a stop and un-DNFs whoever it DNF'd. **Reset** (click once to arm, again to
-   confirm) clears this race's start/finish/DNF state and recorded tracks entirely so
-   it can be re-run — boats and TCF values are kept.
-7. Click a boat's ☆ to mark it **self** and see the **vs Self** column fill in for
+   confirm) clears this race's start/finish/DNF state, every class's start time, and
+   recorded tracks entirely so it can be re-run — boats, their class assignments, and
+   TCF values are kept.
+8. Click a boat's ☆ to mark it **self** and see the **vs Self** column fill in for
    every other boat.
-8. **Export to Excel** downloads the current standings as a `.xlsx` file at any time
+9. **Export to Excel** downloads the current standings as a `.xlsx` file at any time
    — before, during, or after the race. **Download Offline Timer** grabs a standalone
    backup copy of the race instead — worth doing before the start if you want a safety
    net in case the server drops out mid-race.
-9. Switch races anytime via the dropdown at the top to review an earlier race's
-   results, or plan the next one. **Delete Race** (arm-then-confirm) removes one.
+10. Switch races anytime via the dropdown at the top to review an earlier race's
+    results, or plan the next one. **Delete Race** (arm-then-confirm) removes one.
 
 Corrected time is shown live throughout the race (using elapsed-so-far), and freezes
 once a boat's finish time is recorded. The **Est. finish** column shows a projected

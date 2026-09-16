@@ -23,6 +23,7 @@
   let startLineRefs = null; // [pointRefs, pointRefs] or null
   let finishLineRefs = null;
   let markRefs = []; // [pointRefs, ...]
+  let classRowRefs = new Map(); // classId -> row refs, built once and updated in place (same pattern as the boat table's own rows)
   let lastCourseFormRaceId = undefined; // tracks which race the course form reflects
   let replayLive = true;
   let replayTime = Date.now();
@@ -75,7 +76,14 @@
   const ktkRefreshBtn = document.getElementById('ktkRefreshBtn');
   const addBoatRow = document.getElementById('addBoatRow');
   const addBoatName = document.getElementById('addBoatName');
+  const addBoatClass = document.getElementById('addBoatClass');
   const addBoatBtn = document.getElementById('addBoatBtn');
+  const classSection = document.getElementById('classSection');
+  const classToggleBtn = document.getElementById('classToggleBtn');
+  const classBody = document.getElementById('classBody');
+  const classRowsEl = document.getElementById('classRows');
+  const addClassName = document.getElementById('addClassName');
+  const addClassBtn = document.getElementById('addClassBtn');
   const boatsTable = document.getElementById('boatsTable');
   const boatsBody = document.getElementById('boatsBody');
   const emptyMsg = document.getElementById('emptyMsg');
@@ -788,11 +796,12 @@
     // this name) rather than typed at add time — it's only ever hand-edited
     // per boat afterward, in the table row.
     const mmsi = findMmsiByName(name);
+    const classId = addBoatClass.value || null;
     try {
       const boat = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/boats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, mmsi })
+        body: JSON.stringify({ name, mmsi, classId })
       });
       raceState.boats[boat.id] = boat;
       addBoatName.value = '';
@@ -801,6 +810,201 @@
     } catch (e) {
       setStatus(e.message, true);
     }
+  }
+
+  async function addClass() {
+    if (!activeRaceId) return;
+    const name = addClassName.value.trim();
+    if (!name) {
+      setStatus('Enter a class name to add.', true);
+      addClassName.focus();
+      return;
+    }
+    try {
+      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/classes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      addClassName.value = '';
+      addClassName.focus();
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  async function renameClass(classId, name) {
+    if (!activeRaceId) return;
+    try {
+      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/classes/${encodeURIComponent(classId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  async function setClassStartTime(classId, ts) {
+    if (!activeRaceId) return;
+    try {
+      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/classes/${encodeURIComponent(classId)}/startTime`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startTime: ts })
+      });
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  async function removeClass(classId) {
+    if (!activeRaceId) return;
+    try {
+      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/classes/${encodeURIComponent(classId)}`, {
+        method: 'DELETE'
+      });
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  async function setBoatClass(boatId, classId) {
+    if (!activeRaceId) return;
+    try {
+      const boat = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/boats/${encodeURIComponent(boatId)}/class`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ classId: classId || null })
+      });
+      raceState.boats[boatId] = boat;
+      render();
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  }
+
+  // One row per class: name (rename on change), its own start time (Now/
+  // Clear, same pattern as a boat's own start-time override — a boat's
+  // own override still wins over its class's, same as it already won over
+  // the race's single start time), and a remove button. Built once per
+  // class and updated in place (like the boat table's own rows) so typing
+  // a rename isn't interrupted by the next render.
+  function buildClassRow(cls) {
+    const row = document.createElement('div');
+    row.className = 'class-row';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'class-name-input';
+    nameInput.value = cls.name;
+    nameInput.addEventListener('change', () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        nameInput.value = cls.name;
+        return;
+      }
+      renameClass(cls.id, name);
+    });
+
+    const startTimeInput = document.createElement('input');
+    startTimeInput.type = raceState && raceState.multiDay ? 'datetime-local' : 'time';
+    startTimeInput.step = '1';
+    startTimeInput.className = 'class-start-input';
+    startTimeInput.addEventListener('change', () => {
+      if (!startTimeInput.value) {
+        setClassStartTime(cls.id, null);
+        return;
+      }
+      const ts =
+        raceState && raceState.multiDay
+          ? dateTimeInputValueToTs(startTimeInput.value)
+          : timeInputValueToTs(startTimeInput.value, (raceState && raceState.startTime) || Date.now(), false);
+      setClassStartTime(cls.id, ts);
+    });
+
+    const nowBtn = document.createElement('button');
+    nowBtn.type = 'button';
+    nowBtn.className = 'secondary';
+    nowBtn.textContent = 'Now';
+    nowBtn.addEventListener('click', () => setClassStartTime(cls.id, Date.now()));
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'secondary';
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('click', () => setClassStartTime(cls.id, null));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'secondary danger';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove class';
+    removeBtn.addEventListener('click', () => {
+      if (confirm(`Remove class "${cls.name}"? Boats in it go back to no class.`)) removeClass(cls.id);
+    });
+
+    row.append(nameInput, startTimeInput, nowBtn, clearBtn, removeBtn);
+    return { row, nameInput, startTimeInput, nowBtn, clearBtn, removeBtn };
+  }
+
+  function renderClassRows() {
+    const classes = (raceState && raceState.classes) || [];
+    const seenIds = new Set();
+    classes.forEach((cls) => {
+      seenIds.add(cls.id);
+      let refs = classRowRefs.get(cls.id);
+      if (!refs) {
+        refs = buildClassRow(cls);
+        classRowRefs.set(cls.id, refs);
+        classRowsEl.appendChild(refs.row);
+      }
+      if (document.activeElement !== refs.nameInput) refs.nameInput.value = cls.name;
+      refs.startTimeInput.type = raceState.multiDay ? 'datetime-local' : 'time';
+      if (document.activeElement !== refs.startTimeInput) {
+        refs.startTimeInput.value = raceState.multiDay ? tsToDateTimeInputValue(cls.startTime) : tsToTimeInputValue(cls.startTime);
+      }
+      const canSetClassStart = !!raceState.startTime;
+      refs.startTimeInput.disabled = !canSetClassStart;
+      refs.nowBtn.disabled = !canSetClassStart;
+      refs.clearBtn.disabled = !canSetClassStart || !cls.startTime;
+    });
+    Array.from(classRowRefs.keys()).forEach((id) => {
+      if (!seenIds.has(id)) {
+        const refs = classRowRefs.get(id);
+        if (refs.row.parentNode) refs.row.remove();
+        classRowRefs.delete(id);
+      }
+    });
+  }
+
+  // Keeps the add-boat and per-boat class dropdowns in sync with
+  // raceState.classes — rebuilt whenever the class list itself changes,
+  // not every render, so an open dropdown isn't yanked shut mid-use.
+  let lastClassOptionsSignature = null;
+  function classSelectOptionsHtml() {
+    const classes = (raceState && raceState.classes) || [];
+    return '<option value="">No class</option>' + classes.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+  }
+  function refreshClassOptionsIfChanged() {
+    const classes = (raceState && raceState.classes) || [];
+    const signature = classes.map((c) => c.id + ':' + c.name).join('|');
+    if (signature === lastClassOptionsSignature) return;
+    lastClassOptionsSignature = signature;
+    const html = classSelectOptionsHtml();
+    if (document.activeElement !== addBoatClass) addBoatClass.innerHTML = html;
+    rows.forEach((row) => {
+      if (row.classSelect && document.activeElement !== row.classSelect) {
+        const current = row.classSelect.value;
+        row.classSelect.innerHTML = html;
+        row.classSelect.value = current;
+      }
+    });
   }
 
   // Idempotent: if the boat is already gone server-side (a double-click
@@ -2031,14 +2235,23 @@
     }
   }
 
+  // A boat's own start time (a per-boat correction) wins if set; otherwise
+  // its class's start time (a staggered/pursuit start by class) if it's in
+  // one and that class has its own start time set; otherwise the race's
+  // single start time — mirrors index.js's effectiveStartTime exactly.
+  function effectiveStartTime(boat) {
+    if (boat.startTime != null) return boat.startTime;
+    const cls = boat.classId && raceState.classes ? raceState.classes.find((c) => c.id === boat.classId) : null;
+    if (cls && cls.startTime != null) return cls.startTime;
+    return raceState.startTime;
+  }
+
   function boatList() {
     if (!raceState) return [];
     const now = raceNow();
     return Object.values(raceState.boats || {})
       .map((b) => {
-        // A boat with its own start time (a staggered/pursuit start, or a
-        // correction) uses that instead of the race's single start time.
-        const start = b.startTime != null ? b.startTime : raceState.startTime;
+        const start = effectiveStartTime(b);
         // A DNF boat is out of the race — no ticking clock, no rank (sorts
         // to the bottom, same as any other boat with nothing to rank by).
         // A start time still in the future (e.g. a later pursuit-start
@@ -2059,6 +2272,7 @@
           mmsi: b.mmsi || '',
           tcf,
           startTime: b.startTime,
+          classId: b.classId || null,
           finishTime: b.finishTime,
           dnf: !!b.dnf,
           dns: !!b.dns,
@@ -2242,6 +2456,17 @@
     tdVet.hidden = !vetEnabled && !ktkEnabled;
     tdVet.append(vetSelect, vetBadge);
 
+    // Which class (if any) this boat belongs to — a class's own start time
+    // (set in the Classes section) is what this boat's own start time
+    // falls back to before falling back to the race's single start time.
+    const classSelect = document.createElement('select');
+    classSelect.className = 'class-select';
+    classSelect.innerHTML = classSelectOptionsHtml();
+    classSelect.addEventListener('change', () => setBoatClass(boatId, classSelect.value));
+    const tdClass = document.createElement('td');
+    tdClass.hidden = !raceState || !raceState.classes || !raceState.classes.length;
+    tdClass.appendChild(classSelect);
+
     // A boat's own start time, for a staggered/pursuit start or to correct
     // a boat that didn't actually start with the fleet — overrides the
     // race's single start time for this boat only. Blank means "use the
@@ -2381,7 +2606,7 @@
     const tdRemove = document.createElement('td');
     tdRemove.appendChild(removeBtn);
 
-    tr.append(tdName, tdSailNumber, tdMmsi, tdTcf, tdVet, tdStart, tdElapsed, tdCorrected, tdMarks, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
+    tr.append(tdName, tdSailNumber, tdMmsi, tdTcf, tdVet, tdClass, tdStart, tdElapsed, tdCorrected, tdMarks, tdEstFinish, tdVsSelf, tdFinish, tdRemove);
 
     return {
       tr,
@@ -2397,6 +2622,8 @@
       tcfInput,
       vetSelect,
       vetBadge,
+      tdClass,
+      classSelect,
       startTimeInput,
       startNowBtn,
       startClearBtn,
@@ -2499,6 +2726,7 @@
     exportBtn.hidden = !raceState;
     exportOfflineBtn.hidden = !raceState;
     courseSection.hidden = !raceState;
+    classSection.hidden = !raceState;
     raceImportSection.hidden = !raceState || !raceImportEnabled;
     renderStartTimer();
 
@@ -2507,6 +2735,9 @@
       renderChart();
       return;
     }
+
+    renderClassRows();
+    refreshClassOptionsIfChanged();
 
     renderChart();
 
@@ -2606,21 +2837,25 @@
         row.vetHandicapVersion = handicapVersion;
       }
       syncVetSelectValue(row, b.tcf);
+      row.tdClass.hidden = !raceState.classes || !raceState.classes.length;
+      if (document.activeElement !== row.classSelect) {
+        row.classSelect.value = b.classId || '';
+      }
       // A boat with no start time of its own already starts with the
-      // fleet — effectiveStartTime (server-side) falls back to the race's
-      // own start time, and elapsed/corrected already reflect that. The
-      // input showing blank instead of that time made it look like the
-      // boat hadn't started at all even while it was actively being
-      // timed; showing the inherited value (dimmed, to mark it as
-      // inherited rather than a boat-specific override) fixes that
-      // without changing what's actually stored — only "Now" or typing a
-      // value turns it into a real per-boat override (e.g. a pursuit
-      // start), same as before.
-      const effectiveStart = b.startTime != null ? b.startTime : raceState.startTime;
+      // fleet (or its class) — effectiveStartTime falls back to its
+      // class's start time, or the race's own, and elapsed/corrected
+      // already reflect that. The input showing blank instead of that
+      // time made it look like the boat hadn't started at all even while
+      // it was actively being timed; showing the inherited value (dimmed,
+      // to mark it as inherited rather than a boat-specific override)
+      // fixes that without changing what's actually stored — only "Now"
+      // or typing a value turns it into a real per-boat override (e.g. a
+      // pursuit start), same as before.
+      const effectiveStart = effectiveStartTime(b);
       if (document.activeElement !== row.startTimeInput) {
         row.startTimeInput.value = raceState.multiDay ? tsToDateTimeInputValue(effectiveStart) : tsToTimeInputValue(effectiveStart);
       }
-      row.startTimeInput.classList.toggle('inherited-value', b.startTime == null && raceState.startTime != null);
+      row.startTimeInput.classList.toggle('inherited-value', b.startTime == null && effectiveStart != null);
       const canStart = !!raceState.startTime;
       row.startTimeInput.disabled = !canStart;
       row.startNowBtn.disabled = !canStart;
@@ -2799,6 +3034,17 @@
       // was hidden or a different size — Leaflet doesn't pick that up on
       // its own.
       if (chartMap) setTimeout(() => chartMap.invalidateSize(), 0);
+    }
+  });
+  classToggleBtn.addEventListener('click', () => {
+    classBody.hidden = !classBody.hidden;
+    classToggleBtn.textContent = (classBody.hidden ? '▸' : '▾') + ' Classes (staggered starts)';
+  });
+  addClassBtn.addEventListener('click', addClass);
+  addClassName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addClass();
     }
   });
   startTimerToggleBtn.addEventListener('click', () => {

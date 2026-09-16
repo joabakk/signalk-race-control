@@ -759,6 +759,66 @@ tbody tr.dnf td {
   color: var(--muted);
 }
 
+.class-row {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.class-row .class-name-input {
+  width: 10rem;
+  padding: 0.3rem 0.4rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.class-row .class-start-input {
+  padding: 0.3rem 0.4rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.class-row button {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.add-class-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.add-class-row input[type='text'] {
+  flex: 1;
+  min-width: 12rem;
+  max-width: 20rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.class-select {
+  max-width: 9rem;
+  padding: 0.3rem 0.4rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
 .vet-badge.warn {
   color: var(--bad);
 }
