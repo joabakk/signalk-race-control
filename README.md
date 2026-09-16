@@ -113,6 +113,9 @@ and a live projected finishing order — during and after the race.
   navigation aid within 30m of wherever was clicked, it asks whether to snap to that
   aid's exact position and name instead of the raw click), and switches to **Use my
   position** once it has one, to re-centre it on wherever you are right now instead.
+  Once a navigation aid's been picked (or snapped to) anywhere in the course, it's
+  offered instantly in every other start/finish/mark row too — no repeat OpenSeaMap
+  lookup for the same one, e.g. reusing a rounding mark as the finish pin.
   Setting a position this way (map click or self
   position — not while still typing lat/lon by hand) also suggests a name for it from
   OpenStreetMap, when there's a real charted place right there and the name field is

@@ -31,6 +31,7 @@
   let replayPlayTimer = null;
   let replayPlayLastTick = null;
   let waypoints = []; // [{id, name, lat, lon}] from SignalK resources, for the course editor's "Pick a waypoint" dropdown
+  let chosenSeamarks = []; // [{name, lat, lon, source: 'osm'}] picked (or snapped to) from OpenSeaMap this session — offered instantly in every other course-point row too, without a repeat Overpass round-trip for the same name
   let chartMap = null; // Leaflet map, created lazily once the chart section is first expanded
   let chartLayerGroup = null; // holds everything renderChart() redraws, cleared and rebuilt each call
   let chartActiveRaceId; // which race's bounds were last auto-fit, so switching races re-fits once
@@ -1229,6 +1230,16 @@
     return results;
   }
 
+  // Once a mark's been picked from OpenSeaMap (or snapped to) in one
+  // course-point row, it's offered instantly — via the same synchronous
+  // pool as saved waypoints — in every other row too, rather than that
+  // row's own debounced Overpass search having to find it again.
+  function rememberChosenSeamark(item) {
+    const key = item.name.toLowerCase();
+    if (chosenSeamarks.some((s) => s.name.toLowerCase() === key)) return;
+    chosenSeamarks.push({ name: item.name, lat: item.lat, lon: item.lon, source: 'osm' });
+  }
+
   async function searchOsmPlaces(query) {
     const q = query.trim();
     if (!q || !chartMap) return [];
@@ -1361,11 +1372,12 @@
     attachAutocomplete(
       nameInput,
       nameSuggestions,
-      () => waypoints,
+      () => waypoints.concat(chosenSeamarks),
       (wp) => {
         nameInput.value = wp.name;
         latInput.value = wp.lat;
         lonInput.value = wp.lon;
+        if (wp.source === 'osm') rememberChosenSeamark(wp);
         notifyPositionChanged();
       },
       searchOsmPlaces
@@ -1773,6 +1785,7 @@
       target.latInput.value = nearby.lat.toFixed(6);
       target.lonInput.value = nearby.lon.toFixed(6);
       if (target.nameInput && !target.nameInput.value.trim()) target.nameInput.value = nearby.name;
+      rememberChosenSeamark(nearby);
       if (target.onPositionChanged) target.onPositionChanged();
     });
     return chartMap;
