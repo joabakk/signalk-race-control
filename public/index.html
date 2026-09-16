@@ -64,39 +64,29 @@
   <main>
     <p id="noRacesMsg" class="empty" hidden>No races yet. Click "+ New Race" to plan one.</p>
 
-    <div id="courseSection" class="course-section" hidden>
-      <button id="courseToggleBtn" type="button" class="link-btn">▸ Course &amp; chart</button>
-      <div id="courseBody" hidden>
-        <div class="course-grid">
-          <div class="course-group">
-            <h3>Start line</h3>
-            <div id="startLineRows"></div>
-          </div>
-          <div class="course-group">
-            <h3>Marks <span class="hint">(in rounding order)</span></h3>
-            <div id="marksRows"></div>
-            <button id="addMarkBtn" type="button" class="secondary">+ Add Mark</button>
-          </div>
-          <div class="course-group">
-            <h3>Finish line</h3>
-            <div id="finishLineRows"></div>
-          </div>
+    <div id="raceImportSection" class="course-section" hidden>
+      <button id="raceImportToggleBtn" type="button" class="link-btn">▸ Import boats from Manage2Sail</button>
+      <div id="raceImportBody" hidden>
+        <div class="import-row">
+          <input type="text" id="importEventUrl" placeholder="Manage2Sail event URL, e.g. https://www.manage2sail.com/en-US/event/SCER23" autocomplete="off" />
+          <button id="importFindClassesBtn" type="button" class="secondary">Find Classes</button>
         </div>
-        <div class="course-actions">
-          <button id="saveCourseBtn" type="button">Save Course</button>
-          <span id="courseStatusText" class="status"></span>
+        <div id="importClassesList" class="import-classes-list"></div>
+        <div id="importSystemChoices" class="import-system-choices"></div>
+        <div class="import-row">
+          <button id="importBoatsBtn" type="button" hidden>Import Selected Boats</button>
+          <span id="importStatusText" class="status"></span>
         </div>
-        <div class="chart-wrap">
-          <div id="courseChart" class="chart-map"></div>
-          <p id="chartEmptyMsg" class="empty chart-empty-msg" hidden>Add a course, then start the race, to see the chart here</p>
-          <div id="replayControls" class="replay-controls" hidden>
-            <input type="range" id="replaySlider" min="0" max="100" value="100" />
-            <span id="replayTimeLabel">Live</span>
-            <button id="replayPlayBtn" type="button" class="secondary">▶ Play</button>
-            <input type="range" id="replaySpeedSlider" class="replay-speed-slider" min="1" max="60" value="10" title="Playback speed" />
-            <span id="replaySpeedLabel" class="replay-speed-label">10x</span>
-            <button id="replayLiveBtn" type="button" class="secondary">Live</button>
-          </div>
+      </div>
+    </div>
+
+    <div id="classSection" class="course-section" hidden>
+      <button id="classToggleBtn" type="button" class="link-btn">▸ Classes (staggered starts)</button>
+      <div id="classBody" hidden>
+        <div id="classRows"></div>
+        <div class="add-class-row">
+          <input type="text" id="addClassName" placeholder="Class name, e.g. Cruisers" autocomplete="off" />
+          <button id="addClassBtn" type="button" class="secondary">+ Add Class</button>
         </div>
       </div>
     </div>
@@ -126,29 +116,57 @@
       </div>
     </div>
 
-    <div id="raceImportSection" class="course-section" hidden>
-      <button id="raceImportToggleBtn" type="button" class="link-btn">▸ Import boats from Manage2Sail</button>
-      <div id="raceImportBody" hidden>
-        <div class="import-row">
-          <input type="text" id="importEventUrl" placeholder="Manage2Sail event URL, e.g. https://www.manage2sail.com/en-US/event/SCER23" autocomplete="off" />
-          <button id="importFindClassesBtn" type="button" class="secondary">Find Classes</button>
+    <div id="courseSection" class="course-section" hidden>
+      <button id="courseToggleBtn" type="button" class="link-btn">▸ Course &amp; chart</button>
+      <div id="courseBody" hidden>
+        <div class="course-grid">
+          <div class="course-group">
+            <h3>Start line</h3>
+            <table class="course-table">
+              <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /></colgroup>
+              <thead>
+                <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr>
+              </thead>
+              <tbody id="startLineRows"></tbody>
+            </table>
+          </div>
+          <div class="course-group">
+            <h3>Marks <span class="hint">(in rounding order)</span></h3>
+            <table class="course-table">
+              <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /><col style="width: 6rem" /></colgroup>
+              <thead>
+                <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th><th></th></tr>
+              </thead>
+              <tbody id="marksRows"></tbody>
+            </table>
+            <button id="addMarkBtn" type="button" class="secondary">+ Add Mark</button>
+          </div>
+          <div class="course-group">
+            <h3>Finish line</h3>
+            <table class="course-table">
+              <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /></colgroup>
+              <thead>
+                <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr>
+              </thead>
+              <tbody id="finishLineRows"></tbody>
+            </table>
+          </div>
         </div>
-        <div id="importClassesList" class="import-classes-list"></div>
-        <div id="importSystemChoices" class="import-system-choices"></div>
-        <div class="import-row">
-          <button id="importBoatsBtn" type="button" hidden>Import Selected Boats</button>
-          <span id="importStatusText" class="status"></span>
+        <div class="course-actions">
+          <button id="saveCourseBtn" type="button">Save Course</button>
+          <span id="courseStatusText" class="status"></span>
         </div>
-      </div>
-    </div>
-
-    <div id="classSection" class="course-section" hidden>
-      <button id="classToggleBtn" type="button" class="link-btn">▸ Classes (staggered starts)</button>
-      <div id="classBody" hidden>
-        <div id="classRows"></div>
-        <div class="add-class-row">
-          <input type="text" id="addClassName" placeholder="Class name, e.g. Cruisers" autocomplete="off" />
-          <button id="addClassBtn" type="button" class="secondary">+ Add Class</button>
+        <div class="chart-wrap">
+          <div id="courseChart" class="chart-map"></div>
+          <p id="chartEmptyMsg" class="empty chart-empty-msg" hidden>Add a course, then start the race, to see the chart here</p>
+          <div id="replayControls" class="replay-controls" hidden>
+            <input type="range" id="replaySlider" min="0" max="100" value="100" />
+            <span id="replayTimeLabel">Live</span>
+            <button id="replayPlayBtn" type="button" class="secondary">▶ Play</button>
+            <input type="range" id="replaySpeedSlider" class="replay-speed-slider" min="1" max="60" value="10" title="Playback speed" />
+            <span id="replaySpeedLabel" class="replay-speed-label">10x</span>
+            <button id="replayLiveBtn" type="button" class="secondary">Live</button>
+          </div>
         </div>
       </div>
     </div>

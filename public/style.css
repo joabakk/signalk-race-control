@@ -278,9 +278,34 @@ main {
 
 .course-grid {
   margin-top: 0.75rem;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
+}
+
+.course-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.course-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 0 0.35rem 0.3rem;
+}
+
+.course-table td {
+  padding: 0.15rem 0.35rem;
+  vertical-align: middle;
+}
+
+.course-table td:first-child,
+.course-table th:first-child {
+  padding-left: 0;
 }
 
 .course-group h3 {
@@ -299,26 +324,17 @@ main {
   opacity: 0.8;
 }
 
-.course-point-row {
-  display: flex;
-  gap: 0.35rem;
-  margin-bottom: 0.4rem;
-  flex-wrap: wrap;
-  align-items: center;
+.course-actions-cell {
+  white-space: nowrap;
 }
 
 .course-point-row .course-name-autocomplete .suggestions {
-  /* The name field itself is only 7rem wide to fit inline in the row, but
-     the dropdown it opens shouldn't be squeezed to match — that made boat
-     and waypoint names unreadable. right:auto lets it grow past the
-     parent's edge instead of being pinned to it. */
-  right: auto;
   min-width: 16rem;
 }
 
 .course-point-row .course-name-autocomplete {
   position: relative;
-  width: 7rem;
+  width: 100%;
 }
 
 .course-point-row .course-name-input {
@@ -332,7 +348,7 @@ main {
 }
 
 .course-point-row .course-coord-input {
-  width: 6.5rem;
+  width: 100%;
   padding: 0.3rem 0.4rem;
   background: var(--panel);
   color: var(--text);

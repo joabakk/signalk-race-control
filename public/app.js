@@ -1528,7 +1528,7 @@
   // recomputed on every position-setting action here, on any row, since a
   // start line change is typically what unlocks it.
   function buildPointRow(point) {
-    const row = document.createElement('div');
+    const row = document.createElement('tr');
     row.className = 'course-point-row';
 
     const nameWrap = document.createElement('div');
@@ -1623,7 +1623,16 @@
     );
 
     updatePosBtnLabel();
-    row.append(nameWrap, latInput, lonInput, posBtn);
+    const nameCell = document.createElement('td');
+    nameCell.className = 'course-name-cell';
+    nameCell.appendChild(nameWrap);
+    const latCell = document.createElement('td');
+    latCell.appendChild(latInput);
+    const lonCell = document.createElement('td');
+    lonCell.appendChild(lonInput);
+    const posCell = document.createElement('td');
+    posCell.appendChild(posBtn);
+    row.append(nameCell, latCell, lonCell, posCell);
     return { row, nameInput, latInput, lonInput, pickBtn: posBtn, hasPosition };
   }
 
@@ -1730,7 +1739,10 @@
         renderMarkRows();
       }
     });
-    refs.row.append(upBtn, downBtn, removeBtn);
+    const actionsCell = document.createElement('td');
+    actionsCell.className = 'course-actions-cell';
+    actionsCell.append(upBtn, downBtn, removeBtn);
+    refs.row.appendChild(actionsCell);
     return refs;
   }
 
