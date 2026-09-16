@@ -182,7 +182,15 @@ and a live projected finishing order — during and after the race.
   live position — where a further 10 minutes on each close-hauled tack would put it,
   using a generic ~40° tack angle rather than this boat's own polar data. Absent
   whenever that wind/speed data isn't, same as everything else on this chart that
-  depends on live SignalK data.
+  depends on live SignalK data. A **Wind shift** instrument sits above the chart
+  alongside it, once there's enough live wind history (30s or more) to call a trend
+  from: it tracks a rolling ~3-minute average true wind direction as a baseline and
+  compares the current reading against it, reporting **Lift** or **Header** (with the
+  shift in degrees) or **Steady** below a small deadband — tack-aware, since the same
+  shift is a lift on one tack and a header on the other, using this vessel's own
+  heading to tell which. It's a wind-trend read, not a mark-aware tactical simulator —
+  no probability-of-gain number, just whether the breeze has moved for or against
+  whichever tack you're currently on.
 - **Estimated finish time & live rank** — while a boat is still racing, if it has a
   live AIS position and speed and the race has a finish line, the plugin projects a
   finish time and corrected time from its remaining distance and speed, and ranks it

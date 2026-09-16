@@ -276,6 +276,18 @@ main {
   color: var(--muted);
 }
 
+.wind-shift-grid {
+  margin-bottom: 1rem;
+}
+
+.start-timer-value.lift {
+  color: var(--good);
+}
+
+.start-timer-value.header {
+  color: var(--bad);
+}
+
 .course-grid {
   margin-top: 0.75rem;
   display: flex;

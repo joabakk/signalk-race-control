@@ -125,6 +125,10 @@
   const startEtaValue = document.getElementById('startEtaValue');
   const startBurnValue = document.getElementById('startBurnValue');
   const startTimerNote = document.getElementById('startTimerNote');
+  const windShiftBar = document.getElementById('windShiftBar');
+  const windShiftValue = document.getElementById('windShiftValue');
+  const windShiftTack = document.getElementById('windShiftTack');
+  const windShiftTwd = document.getElementById('windShiftTwd');
   const raceImportSection = document.getElementById('raceImportSection');
   const raceImportToggleBtn = document.getElementById('raceImportToggleBtn');
   const raceImportBody = document.getElementById('raceImportBody');
@@ -1179,7 +1183,7 @@
   // start-line transit timer app shows, computed from this vessel's own
   // live position/speed (not any other boat's).
 
-  let selfNav = null; // {lat, lon, sogMs, windDirTrueRad} | null, refreshed on its own poll — see below
+  let selfNav = null; // {lat, lon, sogMs, windDirTrueRad, headingRad} | null, refreshed on its own poll — see below
 
   function normalizeRad(a) {
     const twoPi = Math.PI * 2;
@@ -1215,7 +1219,7 @@
         const angle = windAngleGroundLeaf && typeof windAngleGroundLeaf.value === 'number' ? windAngleGroundLeaf.value : windAngleWaterLeaf && typeof windAngleWaterLeaf.value === 'number' ? windAngleWaterLeaf.value : null;
         if (angle != null) windDirTrueRad = normalizeRad(heading + angle);
       }
-      return { lat: v.latitude, lon: v.longitude, sogMs, windDirTrueRad };
+      return { lat: v.latitude, lon: v.longitude, sogMs, windDirTrueRad, headingRad: heading };
     } catch (e) {
       return null;
     }
@@ -1241,6 +1245,78 @@
     const phi2 = Math.asin(Math.sin(phi1) * Math.cos(delta) + Math.cos(phi1) * Math.sin(delta) * Math.cos(bearingRad));
     const lambda2 = lambda1 + Math.atan2(Math.sin(bearingRad) * Math.sin(delta) * Math.cos(phi1), Math.cos(delta) - Math.sin(phi1) * Math.sin(phi2));
     return { lat: toDeg(phi2), lon: toDeg(lambda2) };
+  }
+
+  // ---- Wind shift / tack-or-hold --------------------------------------
+  // A lift/header indicator: is the current true wind direction shifted
+  // toward this vessel's advantage on whichever tack it's on right now
+  // (favors holding), or away from it (favors tacking onto the shift)?
+  // Tracks a short rolling average of true wind direction as the
+  // "baseline" — the same live SignalK feed the laylines use — since a
+  // helm sailing closehauled keeps adjusting course to hold a steady angle
+  // to the wind, so watching the boat's own heading wouldn't show a shift
+  // that's already been steered around; watching the wind's own bearing
+  // trend does.
+  const WIND_HISTORY_WINDOW_MS = 3 * 60 * 1000; // rolling baseline span
+  const WIND_HISTORY_MIN_SPAN_MS = 30 * 1000; // need at least this much history before calling a shift
+  const WIND_SHIFT_DEADBAND_DEG = 4; // smaller than this reads as "steady", not a real shift
+  let windHistory = []; // [{t, rad}], trimmed to WIND_HISTORY_WINDOW_MS
+
+  function normalizeSignedRad(a) {
+    const twoPi = Math.PI * 2;
+    let r = a % twoPi;
+    if (r > Math.PI) r -= twoPi;
+    if (r < -Math.PI) r += twoPi;
+    return r;
+  }
+
+  // Angles wrap, so a plain arithmetic mean is wrong near the wrap point —
+  // average the unit vectors instead (standard circular mean).
+  function circularMeanRad(radians) {
+    let sumSin = 0;
+    let sumCos = 0;
+    radians.forEach((r) => {
+      sumSin += Math.sin(r);
+      sumCos += Math.cos(r);
+    });
+    return Math.atan2(sumSin, sumCos);
+  }
+
+  // null until there's a moving self position, a true wind direction, a
+  // heading to determine tack from, and enough rolling history to call a
+  // baseline — same "if available, silently not otherwise" spirit as the
+  // laylines above.
+  function computeWindShift() {
+    if (!selfNav || selfNav.windDirTrueRad == null || selfNav.headingRad == null) return null;
+    if (!windHistory.length) return null;
+    const span = windHistory[windHistory.length - 1].t - windHistory[0].t;
+    if (span < WIND_HISTORY_MIN_SPAN_MS) return null;
+    const baselineRad = circularMeanRad(windHistory.map((s) => s.rad));
+    const shiftRad = normalizeSignedRad(selfNav.windDirTrueRad - baselineRad);
+    const shiftDeg = toDeg(shiftRad);
+    // Wind source to the right of the bow (positive) = starboard tack.
+    const tack = normalizeSignedRad(selfNav.windDirTrueRad - selfNav.headingRad) > 0 ? 'starboard' : 'port';
+    let verdict = 'steady';
+    if (Math.abs(shiftDeg) >= WIND_SHIFT_DEADBAND_DEG) {
+      const isLift = tack === 'starboard' ? shiftDeg > 0 : shiftDeg < 0;
+      verdict = isLift ? 'lift' : 'header';
+    }
+    return { tack, verdict, shiftDeg, twdDeg: (toDeg(selfNav.windDirTrueRad) + 360) % 360 };
+  }
+
+  function renderWindShift() {
+    const result = computeWindShift();
+    windShiftBar.hidden = !result;
+    if (!result) return;
+    windShiftTack.textContent = result.tack === 'starboard' ? 'Starboard' : 'Port';
+    windShiftTwd.textContent = `${Math.round(result.twdDeg)}°`;
+    windShiftValue.className = 'start-timer-value';
+    if (result.verdict === 'steady') {
+      windShiftValue.textContent = 'Steady';
+    } else {
+      windShiftValue.textContent = `${result.verdict === 'lift' ? 'Lift' : 'Header'} ${result.shiftDeg >= 0 ? '+' : ''}${Math.round(result.shiftDeg)}°`;
+      windShiftValue.classList.add(result.verdict);
+    }
   }
 
   // Perpendicular distance from a point to the start-line segment (or to
@@ -2874,6 +2950,7 @@
     classSection.hidden = !raceState;
     raceImportSection.hidden = !raceState || !raceImportEnabled;
     renderStartTimer();
+    renderWindShift();
 
     if (!raceState) {
       emptyMsg.hidden = true;
@@ -3175,6 +3252,7 @@
     courseToggleBtn.textContent = (courseBody.hidden ? '▸' : '▾') + ' Course & chart';
     if (!courseBody.hidden) {
       renderChart();
+      renderWindShift();
       // The map may have been created (or last sized) while its container
       // was hidden or a different size — Leaflet doesn't pick that up on
       // its own.
@@ -3283,7 +3361,13 @@
 
   async function refreshSelfNav() {
     selfNav = await fetchSelfNav();
+    if (selfNav && selfNav.windDirTrueRad != null) {
+      const now = Date.now();
+      windHistory.push({ t: now, rad: selfNav.windDirTrueRad });
+      while (windHistory.length && now - windHistory[0].t > WIND_HISTORY_WINDOW_MS) windHistory.shift();
+    }
     renderStartTimer();
+    renderWindShift();
   }
 
   async function init() {
