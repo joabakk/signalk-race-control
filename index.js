@@ -2172,6 +2172,66 @@ module.exports = function (app) {
       res.json({ currentRaceId: state.currentRaceId, races });
     });
 
+    // Proxies an Overpass API query (used by the course editor's OpenSeaMap
+    // nav-mark search/snap) through this server rather than the browser
+    // calling a public Overpass mirror directly. Two problems forced this:
+    // overpass-api.de — the one mirror actually verified to carry real,
+    // complete seamark data — sends no Access-Control-Allow-Origin header,
+    // so a browser fetch to it is blocked outright regardless of whether
+    // the request itself would succeed; and of the two mirrors that do
+    // support CORS, one has been unreachable and the other has been
+    // observed returning a confident HTTP 200 with zero elements for real,
+    // densely-tagged areas. A server-to-server request isn't subject to
+    // CORS at all, so this can freely use the mirror that actually works.
+    const OVERPASS_ENDPOINTS = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://overpass.osm.ch/api/interpreter'
+    ];
+    router.get('/overpass', async (req, res) => {
+      const query = req.query.data;
+      if (!query) return res.status(400).json({ error: 'Missing data query parameter' });
+      // overpass-api.de has the best data but is also the most rate-
+      // limited/overloaded public instance — it can 504 one moment and
+      // work fine a couple of seconds later. A valid-but-empty response
+      // from a worse mirror is accepted only as a last resort (remembered,
+      // not returned immediately), and the whole mirror list gets a second
+      // pass after a short pause before actually giving up — otherwise a
+      // single transient overload on the good mirror would get cached by
+      // the client as "nothing charted here" for the rest of the session.
+      let emptyResult = null;
+      for (let pass = 0; pass < 2; pass++) {
+        for (const base of OVERPASS_ENDPOINTS) {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 12000);
+            let r;
+            try {
+              // overpass-api.de specifically 406s a generic/default
+              // User-Agent (confirmed: it rejects Node's own default one)
+              // — identify the app explicitly, as any well-behaved
+              // Overpass client should.
+              r = await fetch(`${base}?data=${encodeURIComponent(query)}`, {
+                signal: controller.signal,
+                headers: { 'User-Agent': 'signalk-race-control (+https://github.com/joabakk/signalk-race-control)' }
+              });
+            } finally {
+              clearTimeout(timer);
+            }
+            if (!r.ok) continue;
+            const data = await r.json();
+            if (!data || !Array.isArray(data.elements)) continue;
+            if (data.elements.length) return res.json(data);
+            emptyResult = data;
+          } catch (e) {
+            // try the next mirror
+          }
+        }
+        if (pass === 0) await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+      res.json(emptyResult || { elements: [] });
+    });
+
     router.post('/races', (req, res) => {
       const name = ((req.body && req.body.name) || '').trim();
       if (!name) {

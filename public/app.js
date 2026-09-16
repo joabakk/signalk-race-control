@@ -1412,32 +1412,29 @@
   // autocomplete and the pick-on-map snap. Silently returns nothing on
   // any failure or timeout, same spirit as the reverse-geocode name
   // suggestion.
-  // Public Overpass mirrors are individually flaky (rate limits, regional-
-  // only data, outages) — every configured one is queried and their
-  // results merged, rather than stopping at the first success. A single
-  // mirror can return a confident, well-formed, but empty result for an
-  // area its own extract just doesn't cover, which would otherwise poison
-  // the cache for that whole area for the rest of the session; querying
-  // both is only paid once per newly-explored area (not per keystroke or
-  // click the way this used to run), so the extra latency is worth it.
-  const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass.osm.ch/api/interpreter'];
+  // Goes through this plugin's own server (see the /overpass route)
+  // rather than calling a public Overpass mirror directly from here: the
+  // mirror with real, complete seamark data (overpass-api.de) sends no
+  // CORS headers, so a browser fetch to it is blocked outright — a
+  // server-to-server request isn't subject to CORS at all. The server
+  // also handles falling back across mirrors, so this stays a single
+  // same-origin call.
   async function queryOverpass(overpassQuery) {
-    const elements = [];
-    for (const base of OVERPASS_ENDPOINTS) {
+    try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 7000);
+      const timer = setTimeout(() => controller.abort(), 90000);
+      let res;
       try {
-        const res = await fetch(`${base}?data=${encodeURIComponent(overpassQuery)}`, { signal: controller.signal });
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (data && Array.isArray(data.elements)) elements.push(...data.elements);
-      } catch (e) {
-        // try the next endpoint
+        res = await fetch(`${API}/overpass?data=${encodeURIComponent(overpassQuery)}`, { signal: controller.signal });
       } finally {
         clearTimeout(timer);
       }
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data && Array.isArray(data.elements) ? data.elements : [];
+    } catch (e) {
+      return [];
     }
-    return elements;
   }
 
   function seamarkElementsToResults(elements) {
@@ -1465,8 +1462,24 @@
       if (seamarkCacheBounds && seamarkCacheBounds.contains(bounds)) return;
     }
     const padded = bounds.pad(0.5);
-    const bbox = `${padded.getSouth()},${padded.getWest()},${padded.getNorth()},${padded.getEast()}`;
-    const overpassQuery = `[out:json][timeout:15];node["seamark:type"](${bbox});out body 200;`;
+    // The actual Overpass query is clamped to a sane max span around the
+    // padded area's center — a chart zoomed out to show a whole region
+    // (easy to end up at after an auto-fit spanning far-apart boat tracks)
+    // would otherwise turn this into a practically unbounded query, whose
+    // out-body cap then gets consumed by whatever Overpass returns first
+    // rather than the marks actually near what's being searched/picked.
+    // seamarkCacheBounds still tracks the full (unclamped) padded area
+    // below so a wide view isn't re-queried on every subsequent call.
+    const MAX_SPAN_DEG = 1; // ~110km of latitude — generous for any single race course
+    const center = padded.getCenter();
+    const latSpan = Math.min(padded.getNorth() - padded.getSouth(), MAX_SPAN_DEG);
+    const lonSpan = Math.min(padded.getEast() - padded.getWest(), MAX_SPAN_DEG);
+    const queryBounds = L.latLngBounds(
+      [center.lat - latSpan / 2, center.lng - lonSpan / 2],
+      [center.lat + latSpan / 2, center.lng + lonSpan / 2]
+    );
+    const bbox = `${queryBounds.getSouth()},${queryBounds.getWest()},${queryBounds.getNorth()},${queryBounds.getEast()}`;
+    const overpassQuery = `[out:json][timeout:15];node["seamark:type"](${bbox});out body 1000;`;
     seamarkCacheFetch = queryOverpass(overpassQuery);
     let elements;
     try {
