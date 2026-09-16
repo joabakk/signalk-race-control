@@ -1997,18 +1997,21 @@
       target.latInput.value = clickedLat.toFixed(6);
       target.lonInput.value = clickedLon.toFixed(6);
       cancelMapPick();
-      if (target.onPositionChanged) target.onPositionChanged();
 
       // A click is rarely pixel-perfect on the actual mark — if there's a
       // real charted navigation aid right where this one landed, ask
-      // before quietly using the imprecise raw click instead.
+      // before quietly using the imprecise raw click instead. Checked
+      // before onPositionChanged (which fires a generic reverse-geocoded
+      // name guess as soon as a position is set) so a genuine buoy's own
+      // OpenSeaMap name always wins the name field, rather than racing a
+      // slower Overpass lookup against a faster Nominatim one.
       const nearby = await findNearbySeamark(clickedLat, clickedLon);
-      if (!nearby) return;
-      if (!confirm(`Snap to nearby mark "${nearby.name}"?`)) return;
-      target.latInput.value = nearby.lat.toFixed(6);
-      target.lonInput.value = nearby.lon.toFixed(6);
-      if (target.nameInput && !target.nameInput.value.trim()) target.nameInput.value = nearby.name;
-      rememberChosenSeamark(nearby);
+      if (nearby && confirm(`Snap to nearby mark "${nearby.name}"?`)) {
+        target.latInput.value = nearby.lat.toFixed(6);
+        target.lonInput.value = nearby.lon.toFixed(6);
+        if (target.nameInput && !target.nameInput.value.trim()) target.nameInput.value = nearby.name;
+        rememberChosenSeamark(nearby);
+      }
       if (target.onPositionChanged) target.onPositionChanged();
     });
     return chartMap;
