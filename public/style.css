@@ -443,7 +443,6 @@ main {
 
 .chart-map {
   width: 100%;
-  max-width: 800px;
   height: 500px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -487,7 +486,6 @@ main {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
-  max-width: 800px;
 }
 
 .replay-controls input[type='range'] {

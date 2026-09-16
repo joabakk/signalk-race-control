@@ -1712,7 +1712,15 @@
   // and the course section starts collapsed.
   function ensureChartMap() {
     if (chartMap || typeof L === 'undefined') return chartMap;
-    chartMap = L.map(courseChart, { attributionControl: true }).setView([0, 0], 2);
+    // Scroll-wheel zoom starts off — the chart now runs almost full width,
+    // so scrolling the page past it would otherwise get captured as
+    // zooming instead. Clicking the map turns it on for as long as the
+    // mouse stays over it (a normal Leaflet map's own default); moving off
+    // turns it back off, so scrolling past the map again afterward still
+    // just scrolls the page.
+    chartMap = L.map(courseChart, { attributionControl: true, scrollWheelZoom: false }).setView([0, 0], 2);
+    chartMap.on('click', () => chartMap.scrollWheelZoom.enable());
+    courseChart.addEventListener('mouseleave', () => chartMap.scrollWheelZoom.disable());
     chartLayerGroup = L.layerGroup().addTo(chartMap);
     addChartBaseLayers(chartMap);
     chartMap.on('click', async (e) => {

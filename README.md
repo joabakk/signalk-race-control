@@ -123,7 +123,11 @@ and a live projected finishing order — during and after the race.
   available regardless). Every other known waypoint (not part of this race's own
   course) shows on the chart too, as a small dim pin with its name, so it's there to
   reference — or type into a mark's name field — even before it's used.
-  The chart itself is a real background map, like freeboard-sk's: it uses whatever
+  The chart itself runs almost the full page width. Scrolling over it doesn't zoom it
+  by default — the page scrolls past normally, same as anywhere else on the page —
+  click it once to turn scroll-to-zoom on for as long as the mouse stays over it; move
+  off and scrolling past it again goes back to just scrolling the page. It's a real
+  background map, like freeboard-sk's: it uses whatever
   tile-based chart resource(s) this SignalK server has registered, or falls back to
   public OpenStreetMap tiles when none is configured (same fallback freeboard-sk itself
   uses). Registering more than one chart offers them as alternative base layers via the
