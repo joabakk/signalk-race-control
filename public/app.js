@@ -1179,18 +1179,43 @@
   // start-line transit timer app shows, computed from this vessel's own
   // live position/speed (not any other boat's).
 
-  let selfNav = null; // {lat, lon, sogMs} | null, refreshed on its own poll — see below
+  let selfNav = null; // {lat, lon, sogMs, windDirTrueRad} | null, refreshed on its own poll — see below
+
+  function normalizeRad(a) {
+    const twoPi = Math.PI * 2;
+    return ((a % twoPi) + twoPi) % twoPi;
+  }
 
   async function fetchSelfNav() {
     try {
-      const [posLeaf, sogLeaf] = await Promise.all([
+      const [posLeaf, sogLeaf, headingLeaf, cogLeaf, windDirLeaf, windAngleGroundLeaf, windAngleWaterLeaf] = await Promise.all([
         fetchJSON(`${SK_API}/vessels/self/navigation/position`).catch(() => null),
-        fetchJSON(`${SK_API}/vessels/self/navigation/speedOverGround`).catch(() => null)
+        fetchJSON(`${SK_API}/vessels/self/navigation/speedOverGround`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/navigation/headingTrue`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/navigation/courseOverGroundTrue`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/environment/wind/directionTrue`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/environment/wind/angleTrueGround`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/environment/wind/angleTrueWater`).catch(() => null)
       ]);
       const v = posLeaf && posLeaf.value;
       if (!v || typeof v.latitude !== 'number' || typeof v.longitude !== 'number') return null;
       const sogMs = sogLeaf && typeof sogLeaf.value === 'number' ? sogLeaf.value : null;
-      return { lat: v.latitude, lon: v.longitude, sogMs };
+      // True wind direction, absolute (radians, 0 = north) — prefer a
+      // sensor/instrument that already computed it; otherwise derive it
+      // from a true wind ANGLE (relative to the bow) plus heading (or, if
+      // no compass, course over ground as a rough stand-in). null — not
+      // just a missing layline — if none of these are available, per
+      // SignalK's own "best-effort, never a failure" convention elsewhere
+      // in this app.
+      let windDirTrueRad = null;
+      const heading = headingLeaf && typeof headingLeaf.value === 'number' ? headingLeaf.value : cogLeaf && typeof cogLeaf.value === 'number' ? cogLeaf.value : null;
+      if (windDirLeaf && typeof windDirLeaf.value === 'number') {
+        windDirTrueRad = normalizeRad(windDirLeaf.value);
+      } else if (heading != null) {
+        const angle = windAngleGroundLeaf && typeof windAngleGroundLeaf.value === 'number' ? windAngleGroundLeaf.value : windAngleWaterLeaf && typeof windAngleWaterLeaf.value === 'number' ? windAngleWaterLeaf.value : null;
+        if (angle != null) windDirTrueRad = normalizeRad(heading + angle);
+      }
+      return { lat: v.latitude, lon: v.longitude, sogMs, windDirTrueRad };
     } catch (e) {
       return null;
     }
@@ -1199,6 +1224,23 @@
   const MS_TO_KNOTS = 1.9438444924574;
   function toRad(deg) {
     return (deg * Math.PI) / 180;
+  }
+  function toDeg(rad) {
+    return (rad * 180) / Math.PI;
+  }
+
+  const EARTH_RADIUS_M = 6371000;
+  // Destination point a given bearing/distance from a start point (great-
+  // circle "direct" geodesic problem) — used to draw laylines a fixed
+  // sailing distance out from the boat's own position, same spherical
+  // approximation as everywhere else on this chart.
+  function destinationPoint(pt, bearingRad, distanceM) {
+    const delta = distanceM / EARTH_RADIUS_M;
+    const phi1 = toRad(pt.lat);
+    const lambda1 = toRad(pt.lon);
+    const phi2 = Math.asin(Math.sin(phi1) * Math.cos(delta) + Math.cos(phi1) * Math.sin(delta) * Math.cos(bearingRad));
+    const lambda2 = lambda1 + Math.atan2(Math.sin(bearingRad) * Math.sin(delta) * Math.cos(phi1), Math.cos(delta) - Math.sin(phi1) * Math.sin(phi2));
+    return { lat: toDeg(phi2), lon: toDeg(lambda2) };
   }
 
   // Perpendicular distance from a point to the start-line segment (or to
@@ -2224,6 +2266,27 @@
         .bindTooltip(`<span style="color:var(--text)">${escapeHtml(m.name || String(i + 1))}</span>`, { permanent: true, direction: 'top', offset: [0, -8], className: 'mark-label' })
         .addTo(chartLayerGroup);
     });
+
+    // Laylines for this vessel — where a further 10 minutes on each
+    // close-hauled tack would put it, from wherever it is right now. Shown
+    // only when there's actually a true wind direction and a moving SOG to
+    // draw them from (not just a position); silently absent otherwise,
+    // same "if available" spirit as the rest of this app's SignalK-fed
+    // instruments. LAYLINE_TACK_ANGLE_DEG is a generic close-hauled
+    // assumption, not this boat's own polar data — good enough for a rough
+    // visual, not a precise VMG angle.
+    const LAYLINE_TACK_ANGLE_DEG = 40;
+    const LAYLINE_DURATION_S = 10 * 60;
+    if (selfNav && selfNav.windDirTrueRad != null && selfNav.sogMs != null && selfNav.sogMs >= 0.25) {
+      const distanceM = selfNav.sogMs * LAYLINE_DURATION_S;
+      const tackAngleRad = toRad(LAYLINE_TACK_ANGLE_DEG);
+      [selfNav.windDirTrueRad + tackAngleRad, selfNav.windDirTrueRad - tackAngleRad].forEach((bearingRad) => {
+        const end = destinationPoint(selfNav, normalizeRad(bearingRad), distanceM);
+        L.polyline([ll(selfNav), ll(end)], { color: 'var(--accent)', weight: 1.5, dashArray: '2,6' })
+          .bindTooltip('<span style="color:var(--accent)">10min layline</span>', { sticky: true, className: 'mark-label' })
+          .addTo(chartLayerGroup);
+      });
+    }
 
     let minT = Infinity;
     let maxT = -Infinity;

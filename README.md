@@ -177,7 +177,12 @@ and a live projected finishing order — during and after the race.
   the standard Course API starts showing/guiding to the next mark automatically, without
   anyone having to find and select the route by hand right as the race gets underway.
   Requires both a resources provider and a server new enough to have the Course API;
-  a no-op otherwise.
+  a no-op otherwise. Whenever this vessel's own true wind direction and a moving SOG
+  are available from SignalK, the chart also draws a pair of 10-minute laylines from its
+  live position — where a further 10 minutes on each close-hauled tack would put it,
+  using a generic ~40° tack angle rather than this boat's own polar data. Absent
+  whenever that wind/speed data isn't, same as everything else on this chart that
+  depends on live SignalK data.
 - **Estimated finish time & live rank** — while a boat is still racing, if it has a
   live AIS position and speed and the race has a finish line, the plugin projects a
   finish time and corrected time from its remaining distance and speed, and ranks it
