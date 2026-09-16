@@ -126,8 +126,11 @@ and a live projected finishing order — during and after the race.
   The chart itself runs almost the full page width. Scrolling over it doesn't zoom it
   by default — the page scrolls past normally, same as anywhere else on the page —
   click it once to turn scroll-to-zoom on for as long as the mouse stays over it; move
-  off and scrolling past it again goes back to just scrolling the page. It's a real
-  background map, like freeboard-sk's: it uses whatever
+  off and scrolling past it again goes back to just scrolling the page. It auto-fits to
+  the course, waypoints, and boat tracks once when a race is first opened — panning or
+  zooming around after that doesn't get undone on its own; the ⊙ button under the zoom
+  controls re-fits it back to all of that on demand. It's a real background map, like
+  freeboard-sk's: it uses whatever
   tile-based chart resource(s) this SignalK server has registered, or falls back to
   public OpenStreetMap tiles when none is configured (same fallback freeboard-sk itself
   uses). Registering more than one chart offers them as alternative base layers via the

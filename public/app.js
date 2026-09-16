@@ -35,6 +35,7 @@
   let chartLayerGroup = null; // holds everything renderChart() redraws, cleared and rebuilt each call
   let chartActiveRaceId; // which race's bounds were last auto-fit, so switching races re-fits once
   let chartFitDone = false;
+  let lastChartBoundsPts = []; // course/waypoint/track points from the latest render, for the recenter button
   let mapPickTarget = null; // { latInput, lonInput, btn, onPositionChanged } while armed, else null
 
   const raceSelect = document.getElementById('raceSelect');
@@ -1710,6 +1711,35 @@
   // Created lazily, the first time the chart actually has somewhere to
   // render into — Leaflet can't size a map inside a still-hidden container,
   // and the course section starts collapsed.
+  // Shared by the initial auto-fit (once per race, see chartFitDone) and
+  // the recenter button (any time, on demand — panning/zooming away from
+  // the course otherwise had no way back short of switching races and
+  // back again).
+  function fitChartToBounds(map, pts) {
+    if (!pts.length) return;
+    if (pts.length === 1) {
+      map.setView(ll(pts[0]), 15);
+    } else {
+      map.fitBounds(pts.map(ll), { padding: [30, 30] });
+    }
+  }
+
+  const RecenterControl = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function () {
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+      const link = L.DomUtil.create('a', 'recenter-btn', container);
+      link.href = '#';
+      link.title = 'Re-center on the course';
+      link.setAttribute('role', 'button');
+      link.setAttribute('aria-label', 'Re-center on the course');
+      link.innerHTML = '&#9678;';
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(link, 'click', L.DomEvent.stop).on(link, 'click', () => fitChartToBounds(chartMap, lastChartBoundsPts));
+      return container;
+    }
+  });
+
   function ensureChartMap() {
     if (chartMap || typeof L === 'undefined') return chartMap;
     // Scroll-wheel zoom starts off — the chart now runs almost full width,
@@ -1721,6 +1751,7 @@
     chartMap = L.map(courseChart, { attributionControl: true, scrollWheelZoom: false }).setView([0, 0], 2);
     chartMap.on('click', () => chartMap.scrollWheelZoom.enable());
     courseChart.addEventListener('mouseleave', () => chartMap.scrollWheelZoom.disable());
+    new RecenterControl().addTo(chartMap);
     chartLayerGroup = L.layerGroup().addTo(chartMap);
     addChartBaseLayers(chartMap);
     chartMap.on('click', async (e) => {
@@ -1841,6 +1872,7 @@
     otherWaypoints.forEach((w) => boundsPts.push(w));
     boatsWithTrack.forEach((b) => boundsPts.push(...b.track));
     chartEmptyMsg.hidden = boundsPts.length > 0;
+    lastChartBoundsPts = boundsPts;
 
     otherWaypoints.forEach((w) => {
       L.circleMarker(ll(w), { radius: 4, weight: 1, color: 'var(--muted)', fillColor: 'var(--panel)', fillOpacity: 0.6 })
@@ -1946,11 +1978,7 @@
     });
 
     if (!chartFitDone && boundsPts.length) {
-      if (boundsPts.length === 1) {
-        map.setView(ll(boundsPts[0]), 15);
-      } else {
-        map.fitBounds(boundsPts.map(ll), { padding: [30, 30] });
-      }
+      fitChartToBounds(map, boundsPts);
       chartFitDone = true;
     }
 
