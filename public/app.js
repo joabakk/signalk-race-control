@@ -32,7 +32,15 @@
   let replayPlayTimer = null;
   let replayPlayLastTick = null;
   let waypoints = []; // [{id, name, lat, lon}] from SignalK resources, for the course editor's "Pick a waypoint" dropdown
-  let chosenSeamarks = []; // [{name, lat, lon, source: 'osm'}] picked (or snapped to) from OpenSeaMap this session — offered instantly in every other course-point row too, without a repeat Overpass round-trip for the same name
+  // Every named OpenSeaMap seamark (buoy/beacon/light/mark) Overpass has
+  // returned for this chart session, keyed loosely by the map area(s)
+  // already fetched — see ensureSeamarkCache. Both the name autocomplete
+  // and the pick-on-map snap read from this instead of each firing their
+  // own live Overpass query, so panning/zooming the chart once covers
+  // both for as long as the session lasts (marks don't move).
+  let seamarkCache = []; // [{name, lat, lon, source: 'osm'}]
+  let seamarkCacheBounds = null; // L.LatLngBounds already covered by seamarkCache
+  let seamarkCacheFetch = null; // in-flight ensureSeamarkCache promise, so a rapid pan/zoom doesn't fire overlapping queries
   let chartMap = null; // Leaflet map, created lazily once the chart section is first expanded
   let chartLayerGroup = null; // holds everything renderChart() redraws, cleared and rebuilt each call
   let chartActiveRaceId; // which race's bounds were last auto-fit, so switching races re-fits once
@@ -1396,23 +1404,22 @@
   // Best-effort: searches OpenSeaMap's own underlying data — OSM's
   // seamark:* tags, the same data its tiles are rendered from, queried
   // via the Overpass API — for named navigation aids (buoys, beacons,
-  // lights, marks) within the chart's current visible area. Used to
-  // supplement the course editor's waypoint autocomplete: a rounding mark
-  // is far more likely to already be a real charted navigation aid than
-  // an arbitrary place name, so this is scoped to seamark:type features
-  // specifically rather than OSM place names in general. Silently returns
-  // nothing on any failure, timeout, or when the chart hasn't been
-  // created yet (course section not expanded) — same spirit as the
-  // reverse-geocode name suggestion.
+  // lights, marks) in a given area. Used to stock seamarkCache (see
+  // ensureSeamarkCache), which backs both the course editor's name
+  // autocomplete and the pick-on-map snap. Silently returns nothing on
+  // any failure or timeout, same spirit as the reverse-geocode name
+  // suggestion.
   // Public Overpass mirrors are individually flaky (rate limits, regional-
-  // only data, outages) — tried one at a time, in order, falling through
-  // to the next on any failure or timeout. Deliberately sequential, not
-  // raced in parallel: a fast mirror with an incomplete regional extract
-  // would otherwise "win" with a confident-looking empty result and mask
-  // a real answer a fuller (but slower) mirror would have found. Returns
-  // [] if every mirror fails.
+  // only data, outages) — every configured one is queried and their
+  // results merged, rather than stopping at the first success. A single
+  // mirror can return a confident, well-formed, but empty result for an
+  // area its own extract just doesn't cover, which would otherwise poison
+  // the cache for that whole area for the rest of the session; querying
+  // both is only paid once per newly-explored area (not per keystroke or
+  // click the way this used to run), so the extra latency is worth it.
   const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass.osm.ch/api/interpreter'];
   async function queryOverpass(overpassQuery) {
+    const elements = [];
     for (const base of OVERPASS_ENDPOINTS) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 7000);
@@ -1420,14 +1427,14 @@
         const res = await fetch(`${base}?data=${encodeURIComponent(overpassQuery)}`, { signal: controller.signal });
         if (!res.ok) continue;
         const data = await res.json();
-        if (data && Array.isArray(data.elements)) return data.elements;
+        if (data && Array.isArray(data.elements)) elements.push(...data.elements);
       } catch (e) {
         // try the next endpoint
       } finally {
         clearTimeout(timer);
       }
     }
-    return [];
+    return elements;
   }
 
   function seamarkElementsToResults(elements) {
@@ -1442,26 +1449,44 @@
     return results;
   }
 
-  // Once a mark's been picked from OpenSeaMap (or snapped to) in one
-  // course-point row, it's offered instantly — via the same synchronous
-  // pool as saved waypoints — in every other row too, rather than that
-  // row's own debounced Overpass search having to find it again.
-  function rememberChosenSeamark(item) {
-    const key = item.name.toLowerCase();
-    if (chosenSeamarks.some((s) => s.name.toLowerCase() === key)) return;
-    chosenSeamarks.push({ name: item.name, lat: item.lat, lon: item.lon, source: 'osm' });
+  // Fetches every named seamark Overpass knows about in (a generously
+  // padded version of) the given area, once, and folds them into
+  // seamarkCache — skipping the round-trip entirely once an area's
+  // already covered, so panning/zooming the chart a little doesn't
+  // refetch, and a slow/unreachable Overpass mirror only has to be
+  // waited on once per area rather than on every keystroke or click.
+  async function ensureSeamarkCache(bounds) {
+    if (seamarkCacheBounds && seamarkCacheBounds.contains(bounds)) return;
+    if (seamarkCacheFetch) {
+      await seamarkCacheFetch;
+      if (seamarkCacheBounds && seamarkCacheBounds.contains(bounds)) return;
+    }
+    const padded = bounds.pad(0.5);
+    const bbox = `${padded.getSouth()},${padded.getWest()},${padded.getNorth()},${padded.getEast()}`;
+    const overpassQuery = `[out:json][timeout:15];node["seamark:type"](${bbox});out body 200;`;
+    seamarkCacheFetch = queryOverpass(overpassQuery);
+    let elements;
+    try {
+      elements = await seamarkCacheFetch;
+    } finally {
+      seamarkCacheFetch = null;
+    }
+    const seen = new Set(seamarkCache.map((s) => `${s.name.toLowerCase()}|${s.lat}|${s.lon}`));
+    seamarkElementsToResults(elements).forEach((r) => {
+      const key = `${r.name.toLowerCase()}|${r.lat}|${r.lon}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      seamarkCache.push(r);
+    });
+    seamarkCacheBounds = seamarkCacheBounds ? seamarkCacheBounds.extend(padded) : padded;
   }
 
   async function searchOsmPlaces(query) {
     const q = query.trim();
     if (!q || !chartMap) return [];
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const b = chartMap.getBounds();
-    const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
-    const overpassQuery =
-      `[out:json][timeout:9];(node["seamark:type"]["seamark:name"~"${escaped}",i](${bbox});` +
-      `node["seamark:type"]["name"~"${escaped}",i](${bbox}););out body 8;`;
-    return seamarkElementsToResults(await queryOverpass(overpassQuery));
+    await ensureSeamarkCache(chartMap.getBounds());
+    const needle = q.toLowerCase();
+    return seamarkCache.filter((s) => s.name.toLowerCase().includes(needle)).slice(0, 8);
   }
 
   // Used right after a map click: is there a real charted navigation aid
@@ -1473,9 +1498,9 @@
   const SNAP_RADIUS_M = 30;
   async function findNearbySeamark(lat, lon) {
     if (!chartMap) return null;
-    const overpassQuery = `[out:json][timeout:9];node(around:${SNAP_RADIUS_M},${lat},${lon})["seamark:type"];out body 5;`;
-    const elements = await queryOverpass(overpassQuery);
-    const candidates = seamarkElementsToResults(elements);
+    const clickPt = L.latLng(lat, lon);
+    await ensureSeamarkCache(L.latLngBounds(clickPt, clickPt).extend(chartMap.getBounds()));
+    const candidates = seamarkCache.filter((s) => distanceMeters(lat, lon, s.lat, s.lon) <= SNAP_RADIUS_M);
     if (!candidates.length) return null;
     candidates.sort((a, b) => distanceMeters(lat, lon, a.lat, a.lon) - distanceMeters(lat, lon, b.lat, b.lon));
     return candidates[0];
@@ -1587,12 +1612,11 @@
     attachAutocomplete(
       nameInput,
       nameSuggestions,
-      () => waypoints.concat(chosenSeamarks),
+      () => waypoints.concat(seamarkCache),
       (wp) => {
         nameInput.value = wp.name;
         latInput.value = wp.lat;
         lonInput.value = wp.lon;
-        if (wp.source === 'osm') rememberChosenSeamark(wp);
         notifyPositionChanged();
       },
       searchOsmPlaces
@@ -1992,6 +2016,16 @@
     new RecenterControl().addTo(chartMap);
     chartLayerGroup = L.layerGroup().addTo(chartMap);
     addChartBaseLayers(chartMap);
+    // Keeps seamarkCache warm for whatever area the chart actually settles
+    // on — the initial course auto-fit, the recenter button, or a manual
+    // pan/zoom — so the name autocomplete and pick-on-map snap are usually
+    // served from cache by the time they're needed instead of waiting on
+    // Overpass right then. Skipped at the very wide starting view (and any
+    // zoom that wide) since that'd mean fetching half an ocean.
+    chartMap.on('moveend', () => {
+      if (chartMap.getZoom() < 8) return;
+      ensureSeamarkCache(chartMap.getBounds()).catch(() => {});
+    });
     chartMap.on('click', async (e) => {
       if (!mapPickTarget) return;
       const target = mapPickTarget;
@@ -2017,7 +2051,6 @@
         target.latInput.value = nearby.lat.toFixed(6);
         target.lonInput.value = nearby.lon.toFixed(6);
         if (target.nameInput && !target.nameInput.value.trim()) target.nameInput.value = nearby.name;
-        rememberChosenSeamark(nearby);
         if (target.onPositionChanged) target.onPositionChanged(false);
       } else if (target.onPositionChanged) {
         target.onPositionChanged(true);
