@@ -119,42 +119,45 @@
     <div id="courseSection" class="course-section" hidden>
       <button id="courseToggleBtn" type="button" class="link-btn">▸ Course &amp; chart</button>
       <div id="courseBody" hidden>
-        <div class="course-grid">
-          <div class="course-group">
-            <h3>Start line</h3>
-            <table class="course-table">
-              <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /></colgroup>
-              <thead>
-                <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr>
-              </thead>
-              <tbody id="startLineRows"></tbody>
-            </table>
+        <button id="positionsToggleBtn" type="button" class="link-btn">▾ Positions</button>
+        <div id="positionsBody">
+          <div class="course-grid">
+            <div class="course-group">
+              <h3>Start line</h3>
+              <table class="course-table">
+                <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /></colgroup>
+                <thead>
+                  <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr>
+                </thead>
+                <tbody id="startLineRows"></tbody>
+              </table>
+            </div>
+            <div class="course-group">
+              <h3>Marks <span class="hint">(in rounding order)</span></h3>
+              <table class="course-table">
+                <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /><col style="width: 6rem" /></colgroup>
+                <thead>
+                  <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th><th></th></tr>
+                </thead>
+                <tbody id="marksRows"></tbody>
+              </table>
+              <button id="addMarkBtn" type="button" class="secondary">+ Add Mark</button>
+            </div>
+            <div class="course-group">
+              <h3>Finish line</h3>
+              <table class="course-table">
+                <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /></colgroup>
+                <thead>
+                  <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr>
+                </thead>
+                <tbody id="finishLineRows"></tbody>
+              </table>
+            </div>
           </div>
-          <div class="course-group">
-            <h3>Marks <span class="hint">(in rounding order)</span></h3>
-            <table class="course-table">
-              <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /><col style="width: 6rem" /></colgroup>
-              <thead>
-                <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th><th></th></tr>
-              </thead>
-              <tbody id="marksRows"></tbody>
-            </table>
-            <button id="addMarkBtn" type="button" class="secondary">+ Add Mark</button>
+          <div class="course-actions">
+            <button id="saveCourseBtn" type="button">Save Course</button>
+            <span id="courseStatusText" class="status"></span>
           </div>
-          <div class="course-group">
-            <h3>Finish line</h3>
-            <table class="course-table">
-              <colgroup><col /><col style="width: 7rem" /><col style="width: 7rem" /><col style="width: 8.5rem" /></colgroup>
-              <thead>
-                <tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr>
-              </thead>
-              <tbody id="finishLineRows"></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="course-actions">
-          <button id="saveCourseBtn" type="button">Save Course</button>
-          <span id="courseStatusText" class="status"></span>
         </div>
         <div class="chart-wrap">
           <div id="courseChart" class="chart-map"></div>

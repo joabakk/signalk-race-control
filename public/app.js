@@ -100,6 +100,8 @@
   const courseSection = document.getElementById('courseSection');
   const courseToggleBtn = document.getElementById('courseToggleBtn');
   const courseBody = document.getElementById('courseBody');
+  const positionsToggleBtn = document.getElementById('positionsToggleBtn');
+  const positionsBody = document.getElementById('positionsBody');
   const startLineRowsEl = document.getElementById('startLineRows');
   const finishLineRowsEl = document.getElementById('finishLineRows');
   const marksRowsEl = document.getElementById('marksRows');
@@ -499,6 +501,7 @@
     const id = raceState ? raceState.id : null;
     if (id !== lastCourseFormRaceId) {
       loadCourseFormFromRace();
+      setCourseStatus('');
       lastCourseFormRaceId = id;
       // A running replay is specific to whichever race's track it was
       // playing through — switching races (or to none) leaves it with
@@ -1770,7 +1773,16 @@
     markRefs = (c.marks || []).map((m) => buildMarkRow(m));
     renderMarkRows();
     updateMarkPickGating();
-    setCourseStatus('');
+
+    // A race that already has a saved course doesn't need its position
+    // tables open by default — the chart below is the useful part once
+    // there's nothing left to fill in. Collapsed on load for an
+    // already-configured race, and again right after a save (this same
+    // function runs then too); an empty course stays expanded since
+    // there's nothing yet to hide and editing is the whole point.
+    const hasCourse = !!(c.startLine || c.finishLine || (c.marks && c.marks.length));
+    positionsBody.hidden = hasCourse;
+    positionsToggleBtn.textContent = (positionsBody.hidden ? '▸' : '▾') + ' Positions';
   }
 
   function pointFromRefs(refs) {
@@ -3092,6 +3104,10 @@
       // its own.
       if (chartMap) setTimeout(() => chartMap.invalidateSize(), 0);
     }
+  });
+  positionsToggleBtn.addEventListener('click', () => {
+    positionsBody.hidden = !positionsBody.hidden;
+    positionsToggleBtn.textContent = (positionsBody.hidden ? '▸' : '▾') + ' Positions';
   });
   classToggleBtn.addEventListener('click', () => {
     classBody.hidden = !classBody.hidden;
