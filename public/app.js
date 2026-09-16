@@ -653,7 +653,10 @@
       setStatus('Pick a date/time to schedule the call-off.', true);
       return;
     }
-    const ts = new Date(callOffInput.value).getTime();
+    // A single-day race only needs a time — "today" (rolling to tomorrow
+    // if that time's already passed, since this is scheduling something
+    // ahead) is the only sensible date for a call-off anyway.
+    const ts = raceState && raceState.multiDay ? dateTimeInputValueToTs(callOffInput.value) : timeInputValueToTs(callOffInput.value, Date.now(), true);
     if (!isFinite(ts)) {
       setStatus('Invalid call-off time.', true);
       return;
@@ -740,7 +743,9 @@
       setStatus('Pick a date/time to schedule the start.', true);
       return;
     }
-    const ts = new Date(scheduleInput.value).getTime();
+    // Same reasoning as scheduleCallOff: a single-day race only needs a
+    // time, rolling to tomorrow if that time's already passed today.
+    const ts = raceState && raceState.multiDay ? dateTimeInputValueToTs(scheduleInput.value) : timeInputValueToTs(scheduleInput.value, Date.now(), true);
     if (!isFinite(ts)) {
       setStatus('Invalid scheduled start time.', true);
       return;
@@ -2539,10 +2544,12 @@
         : tsToTimeInputValue(raceState.startTime);
     }
 
+    scheduleInput.type = raceState.multiDay ? 'datetime-local' : 'time';
     scheduleInput.disabled = !!raceState.startTime;
     scheduleBtn.disabled = !!raceState.startTime;
     cancelScheduleBtn.hidden = !raceState.scheduledStart || !!raceState.startTime;
 
+    callOffInput.type = raceState.multiDay ? 'datetime-local' : 'time';
     callOffInput.disabled = !!raceState.stopTime;
     scheduleCallOffBtn.disabled = !!raceState.stopTime;
     scheduleCallOffBtn.textContent = raceState.scheduledCallOff
