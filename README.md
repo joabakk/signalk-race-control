@@ -268,10 +268,10 @@ Then restart the SignalK server, enable "Race Control" under
    boat if you want its AIS position tracked for the chart/estimate.
 3. Optionally expand **Course & chart** and enter the start line, marks (in rounding
    order — reorder with ↑/↓), and finish line, then **Save Course**.
-4. Either click **Start Race** now, or set a time (a full date too, for a multi-day
-   race) and click **Schedule Start** — the race starts itself automatically at that
-   moment (even across a server restart; a time already passed today rolls over to
-   tomorrow, since this is scheduling something ahead).
+4. Either click **Start Race** now, or set a date/time and click **Schedule Start** —
+   the race starts itself automatically at that moment (even across a server restart).
+   A real date's always needed here regardless of a single- vs. multi-day race, since a
+   start is often scheduled well ahead of race day itself.
    Clicked it a little late? Fix the recorded moment directly in the **Race start**
    field next to the clock (Now/Clear) — unlike Reset, it never touches any boat's
    finish time, DNF, or individual start override. If a particular boat actually

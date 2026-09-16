@@ -743,9 +743,11 @@
       setStatus('Pick a date/time to schedule the start.', true);
       return;
     }
-    // Same reasoning as scheduleCallOff: a single-day race only needs a
-    // time, rolling to tomorrow if that time's already passed today.
-    const ts = raceState && raceState.multiDay ? dateTimeInputValueToTs(scheduleInput.value) : timeInputValueToTs(scheduleInput.value, Date.now(), true);
+    // Unlike the call-off, a scheduled start is often set well ahead of
+    // race day itself (e.g. scheduling Saturday's start on Wednesday) —
+    // always needs a real date, regardless of whether the race itself is
+    // single- or multi-day.
+    const ts = dateTimeInputValueToTs(scheduleInput.value);
     if (!isFinite(ts)) {
       setStatus('Invalid scheduled start time.', true);
       return;
@@ -2544,7 +2546,6 @@
         : tsToTimeInputValue(raceState.startTime);
     }
 
-    scheduleInput.type = raceState.multiDay ? 'datetime-local' : 'time';
     scheduleInput.disabled = !!raceState.startTime;
     scheduleBtn.disabled = !!raceState.startTime;
     cancelScheduleBtn.hidden = !raceState.scheduledStart || !!raceState.startTime;
