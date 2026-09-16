@@ -305,6 +305,7 @@ function ensureRaceShape(race) {
   if (race.stopTime === undefined) race.stopTime = null;
   if (race.scheduledCallOff === undefined) race.scheduledCallOff = null;
   if (race.multiDay === undefined) race.multiDay = false;
+  if (race.courseActivated === undefined) race.courseActivated = false;
   if (!race.classes) race.classes = [];
   race.classes.forEach((c) => {
     if (c.startTime === undefined) c.startTime = null;
@@ -362,6 +363,22 @@ function distanceNm(a, b) {
 
 function midpoint(a, b) {
   return { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 };
+}
+
+// True if segment p1-p2 crosses segment p3-p4 — the standard orientation
+// (cross-product sign) test. Treats lat/lon as a flat plane, fine at the
+// scale of a start line (tens to low hundreds of meters). Used to detect a
+// boat crossing the start line between two consecutive position samples;
+// doesn't distinguish direction (inbound vs outbound) or handle the
+// collinear/touching edge case — a crossing landing exactly on that is
+// astronomically unlikely, and would just be caught on the next sample.
+function segmentsIntersect(p1, p2, p3, p4) {
+  const cross = (o, a, b) => (a.lon - o.lon) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lon - o.lon);
+  const d1 = cross(p3, p4, p1);
+  const d2 = cross(p3, p4, p2);
+  const d3 = cross(p1, p2, p3);
+  const d4 = cross(p1, p2, p4);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
 function validateCoordPoint(p) {
@@ -1600,6 +1617,7 @@ module.exports = function (app) {
   let dataFile = null;
   const scheduleTimers = new Map(); // raceId -> Timeout, for scheduledStart
   const callOffTimers = new Map(); // raceId -> Timeout, for scheduledCallOff
+  let lastSelfPos = null; // {lat, lon} as of the previous checkStartLineCrossings tick
 
   // setTimeout's delay is a 32-bit signed int internally — anything past
   // ~24.8 days silently wraps and fires almost immediately instead of
@@ -1988,6 +2006,48 @@ module.exports = function (app) {
     if (changed) saveState();
   }
 
+  // Once a race has started and this vessel (this SignalK server's own
+  // position, not any boat in the fleet) actually crosses its start line,
+  // activate that race's course as the vessel's current SignalK navigation
+  // route — so a chart plotter (freeboard-sk etc.) reading the standard
+  // Course API immediately starts showing/guiding to the next mark,
+  // without anyone having to find and select the route by hand right as
+  // the race gets underway. Detected as a genuine line crossing between
+  // two consecutive position samples (not just proximity), same 15s
+  // cadence as recordTrackSample. Best-effort and silently skipped if this
+  // server has no Course API (older signalk-server) or no resourcesApi —
+  // core race-control features never depend on this succeeding.
+  async function checkStartLineCrossings() {
+    let selfPos = null;
+    try {
+      const leaf = app.getSelfPath('navigation.position');
+      const v = leaf && leaf.value;
+      if (v && typeof v.latitude === 'number' && typeof v.longitude === 'number') {
+        selfPos = { lat: v.latitude, lon: v.longitude };
+      }
+    } catch (e) {
+      // no self position available yet
+    }
+    const prevPos = lastSelfPos;
+    lastSelfPos = selfPos;
+    if (!selfPos || !prevPos || typeof app.activateRoute !== 'function') return;
+    for (const race of Object.values(state.races)) {
+      if (!race.startTime || race.stopTime || race.courseActivated) continue;
+      const line = race.course && race.course.startLine;
+      if (!line) continue;
+      if (!segmentsIntersect(prevPos, selfPos, line[0], line[1])) continue;
+      try {
+        await publishCourseResources(race);
+        await app.activateRoute({ href: `/resources/routes/${deterministicUuid(`race-${race.id}-course`)}`, pointIndex: 0 });
+        race.courseActivated = true;
+        saveState();
+        app.debug(`race-control: activated course for race "${race.name}" after crossing the start line`);
+      } catch (e) {
+        app.debug('race-control: could not activate course in SignalK: ' + e.message);
+      }
+    }
+  }
+
   function disarmSchedule(raceId) {
     const t = scheduleTimers.get(raceId);
     if (t) {
@@ -2002,6 +2062,7 @@ module.exports = function (app) {
     race.startTime = atTime;
     race.scheduledStart = null;
     race.stopTime = null;
+    race.courseActivated = false;
     Object.values(race.boats).forEach((b) => {
       b.finishTime = null;
       b.startTime = null;
@@ -2151,7 +2212,10 @@ module.exports = function (app) {
       armSchedule(race);
       armCallOffSchedule(race);
     });
-    trackTimer = setInterval(recordTrackSample, 15000);
+    trackTimer = setInterval(() => {
+      recordTrackSample();
+      checkStartLineCrossings().catch((e) => app.debug('race-control: checkStartLineCrossings failed: ' + e.message));
+    }, 15000);
     app.setPluginStatus('Race control ready');
   };
 

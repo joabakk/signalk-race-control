@@ -170,7 +170,14 @@ and a live projected finishing order — during and after the race.
   waypoint/route resources for any chart plotter (e.g. freeboard-sk) that reads the
   standard resources API — both directions (reading existing waypoints for the
   autocomplete, and publishing the saved course) only do anything if your server has a
-  resources provider installed; they're a no-op otherwise, never a failure.
+  resources provider installed; they're a no-op otherwise, never a failure. Once a race
+  has started, the moment this vessel's own position actually crosses the start line
+  (a real crossing between two GPS fixes, not just getting close to it), the course is
+  also activated as this vessel's SignalK navigation route — so a chart plotter reading
+  the standard Course API starts showing/guiding to the next mark automatically, without
+  anyone having to find and select the route by hand right as the race gets underway.
+  Requires both a resources provider and a server new enough to have the Course API;
+  a no-op otherwise.
 - **Estimated finish time & live rank** — while a boat is still racing, if it has a
   live AIS position and speed and the race has a finish line, the plugin projects a
   finish time and corrected time from its remaining distance and speed, and ranks it
