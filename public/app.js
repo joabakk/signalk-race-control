@@ -36,7 +36,8 @@
   let chartLayerGroup = null; // holds everything renderChart() redraws, cleared and rebuilt each call
   let chartActiveRaceId; // which race's bounds were last auto-fit, so switching races re-fits once
   let chartFitDone = false;
-  let lastChartBoundsPts = []; // course/waypoint/track points from the latest render, for the recenter button
+  let lastChartBoundsPts = []; // course/waypoint/track points from the latest render, for the one-time initial auto-fit
+  let lastCourseOnlyBoundsPts = []; // just this race's own start/finish/marks, for the recenter button
   let mapPickTarget = null; // { latInput, lonInput, btn, onPositionChanged } while armed, else null
 
   const raceSelect = document.getElementById('raceSelect');
@@ -1723,10 +1724,12 @@
   // Created lazily, the first time the chart actually has somewhere to
   // render into — Leaflet can't size a map inside a still-hidden container,
   // and the course section starts collapsed.
-  // Shared by the initial auto-fit (once per race, see chartFitDone) and
-  // the recenter button (any time, on demand — panning/zooming away from
-  // the course otherwise had no way back short of switching races and
-  // back again).
+  // Shared by the initial auto-fit (once per race, see chartFitDone — over
+  // the course, other known waypoints, and boat tracks, everything the
+  // chart draws) and the recenter button (any time, on demand, but scoped
+  // to just this race's own start/finish/marks — see lastCourseOnlyBoundsPts
+  // — so it's a stable "back to the course" reset that doesn't keep
+  // shifting as boats move, unlike the initial fit).
   function fitChartToBounds(map, pts) {
     if (!pts.length) return;
     if (pts.length === 1) {
@@ -1742,12 +1745,12 @@
       const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
       const link = L.DomUtil.create('a', 'recenter-btn', container);
       link.href = '#';
-      link.title = 'Re-center on the course';
+      link.title = "Re-center on this race's course";
       link.setAttribute('role', 'button');
-      link.setAttribute('aria-label', 'Re-center on the course');
+      link.setAttribute('aria-label', "Re-center on this race's course");
       link.innerHTML = '&#9678;';
       L.DomEvent.disableClickPropagation(container);
-      L.DomEvent.on(link, 'click', L.DomEvent.stop).on(link, 'click', () => fitChartToBounds(chartMap, lastChartBoundsPts));
+      L.DomEvent.on(link, 'click', L.DomEvent.stop).on(link, 'click', () => fitChartToBounds(chartMap, lastCourseOnlyBoundsPts));
       return container;
     }
   });
@@ -1878,10 +1881,13 @@
     const ownPrefix = `${raceState.name} — `;
     const otherWaypoints = waypoints.filter((w) => !w.name || !w.name.startsWith(ownPrefix));
 
-    const boundsPts = [];
-    if (course.startLine) boundsPts.push(...course.startLine);
-    if (course.finishLine) boundsPts.push(...course.finishLine);
-    boundsPts.push(...course.marks);
+    const courseOnlyPts = [];
+    if (course.startLine) courseOnlyPts.push(...course.startLine);
+    if (course.finishLine) courseOnlyPts.push(...course.finishLine);
+    courseOnlyPts.push(...course.marks);
+    lastCourseOnlyBoundsPts = courseOnlyPts;
+
+    const boundsPts = courseOnlyPts.slice();
     otherWaypoints.forEach((w) => boundsPts.push(w));
     boatsWithTrack.forEach((b) => boundsPts.push(...b.track));
     chartEmptyMsg.hidden = boundsPts.length > 0;

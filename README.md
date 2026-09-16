@@ -132,7 +132,9 @@ and a live projected finishing order — during and after the race.
   off and scrolling past it again goes back to just scrolling the page. It auto-fits to
   the course, waypoints, and boat tracks once when a race is first opened — panning or
   zooming around after that doesn't get undone on its own; the ⊙ button under the zoom
-  controls re-fits it back to all of that on demand. It's a real background map, like
+  controls re-centers on demand, scoped to just this race's own start/finish/marks (not
+  other waypoints or wherever the boats have since sailed to) — a stable "back to the
+  course" reset rather than one that shifts as the race goes on. It's a real background map, like
   freeboard-sk's: it uses whatever
   tile-based chart resource(s) this SignalK server has registered, or falls back to
   public OpenStreetMap tiles when none is configured (same fallback freeboard-sk itself
