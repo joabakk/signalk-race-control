@@ -1750,7 +1750,16 @@
       link.setAttribute('aria-label', "Re-center on this race's course");
       link.innerHTML = '&#9678;';
       L.DomEvent.disableClickPropagation(container);
-      L.DomEvent.on(link, 'click', L.DomEvent.stop).on(link, 'click', () => fitChartToBounds(chartMap, lastCourseOnlyBoundsPts));
+      L.DomEvent.on(link, 'click', L.DomEvent.stop).on(link, 'click', async () => {
+        if (lastCourseOnlyBoundsPts.length) {
+          fitChartToBounds(chartMap, lastCourseOnlyBoundsPts);
+          return;
+        }
+        // Nothing set yet to recenter on — fall back to wherever this
+        // vessel actually is, rather than doing nothing.
+        const pos = await fetchSelfPosition();
+        if (pos) chartMap.setView([pos.lat, pos.lon], 15);
+      });
       return container;
     }
   });
