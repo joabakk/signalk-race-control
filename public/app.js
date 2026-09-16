@@ -1554,9 +1554,12 @@
     // The heavier, best-effort name suggestion only makes sense after a
     // real discrete action (a map click, a self-position fetch) — not on
     // every keystroke while someone's still typing lat/lon by hand.
-    function handlePositionSet() {
+    // suggestName can be held off (map click passes false up front) so the
+    // button/gating feedback lands instantly while a slower seamark lookup
+    // is still deciding whether a real buoy name should win instead.
+    function handlePositionSet(suggestName = true) {
       notifyPositionChanged();
-      maybeSuggestNameFromPosition(nameInput, latInput.value, lonInput.value);
+      if (suggestName) maybeSuggestNameFromPosition(nameInput, latInput.value, lonInput.value);
     }
 
     latInput.addEventListener('input', notifyPositionChanged);
@@ -1997,22 +2000,28 @@
       target.latInput.value = clickedLat.toFixed(6);
       target.lonInput.value = clickedLon.toFixed(6);
       cancelMapPick();
+      // Instant feedback (button label, mark-pick gating) right away —
+      // the name suggestion alone waits on the seamark lookup below, so a
+      // slow/unreachable Overpass mirror never makes the click itself
+      // look like it did nothing.
+      if (target.onPositionChanged) target.onPositionChanged(false);
 
       // A click is rarely pixel-perfect on the actual mark — if there's a
       // real charted navigation aid right where this one landed, ask
       // before quietly using the imprecise raw click instead. Checked
-      // before onPositionChanged (which fires a generic reverse-geocoded
-      // name guess as soon as a position is set) so a genuine buoy's own
-      // OpenSeaMap name always wins the name field, rather than racing a
-      // slower Overpass lookup against a faster Nominatim one.
+      // before suggesting any name so a genuine buoy's own OpenSeaMap
+      // name always wins the name field, rather than racing a slower
+      // Overpass lookup against a faster Nominatim one.
       const nearby = await findNearbySeamark(clickedLat, clickedLon);
       if (nearby && confirm(`Snap to nearby mark "${nearby.name}"?`)) {
         target.latInput.value = nearby.lat.toFixed(6);
         target.lonInput.value = nearby.lon.toFixed(6);
         if (target.nameInput && !target.nameInput.value.trim()) target.nameInput.value = nearby.name;
         rememberChosenSeamark(nearby);
+        if (target.onPositionChanged) target.onPositionChanged(false);
+      } else if (target.onPositionChanged) {
+        target.onPositionChanged(true);
       }
-      if (target.onPositionChanged) target.onPositionChanged();
     });
     return chartMap;
   }
