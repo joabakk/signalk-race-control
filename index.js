@@ -3224,3 +3224,37 @@ module.exports = function (app) {
 
   return plugin;
 };
+
+// Exposes the pure, top-level helper functions above for unit testing —
+// none of this runs, or is even looked at, when SignalK loads the plugin
+// via `require('signalk-race-control')(app)`; it's a plain extra property
+// on the exported factory function, purely for `test/*.test.js` to import
+// without instantiating a whole plugin + mock app for logic that doesn't
+// need one.
+module.exports.internal = {
+  parseCsvText,
+  parseNorwegianNumber,
+  parseHandicapSheet,
+  stripHtmlToText,
+  parseKtkHtml,
+  extractGoogleSheetId,
+  parseManage2SailEventPage,
+  parseManage2SailEntries,
+  findHandicapSystem,
+  resolveHandicapSystem,
+  makeRaceId,
+  makeBoatId,
+  makeClassId,
+  raceSummary,
+  emptyCourse,
+  ensureRaceShape,
+  findClass,
+  effectiveStartTime,
+  distanceNm,
+  midpoint,
+  segmentsIntersect,
+  validateCoordPoint,
+  validateLine,
+  formatLocalDateTime,
+  buildOfflineTimerHtml
+};
