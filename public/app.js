@@ -2999,8 +2999,14 @@
         : tsToTimeInputValue(raceState.startTime);
     }
 
+    if (document.activeElement !== scheduleInput) {
+      scheduleInput.value = tsToDateTimeInputValue(raceState.scheduledStart);
+    }
     scheduleInput.disabled = !!raceState.startTime;
     scheduleBtn.disabled = !!raceState.startTime;
+    scheduleBtn.textContent = raceState.scheduledStart
+      ? 'Scheduled: ' + new Date(raceState.scheduledStart).toLocaleString()
+      : 'Schedule Start';
     cancelScheduleBtn.hidden = !raceState.scheduledStart || !!raceState.startTime;
 
     callOffInput.type = raceState.multiDay ? 'datetime-local' : 'time';
