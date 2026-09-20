@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Race Control</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --good: #22c55e;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    /* This page is a read-only display embedded in an MFD's browser tile —
+       no inputs, no keyboard interaction, nothing to select or tap. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    padding: 0.6rem 0.8rem;
+    overflow: hidden;
+  }
+  h1 {
+    margin: 0 0 0.3rem;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 1.1rem;
+    text-align: center;
+  }
+  .countdown {
+    text-align: center;
+    font-size: clamp(2.2rem, 12vw, 4rem);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    margin: 0.2rem 0;
+  }
+  .state-label {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.4rem;
+  }
+  .start-timer-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-top: auto;
+  }
+  .start-timer-tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem;
+    text-align: center;
+  }
+  .start-timer-label {
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .start-timer-value {
+    font-size: clamp(1rem, 4vw, 1.4rem);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .start-timer-value.early { color: var(--good); }
+  .start-timer-value.late { color: var(--bad); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: clamp(0.85rem, 3vw, 1.05rem);
+  }
+  th, td {
+    padding: 0.3rem 0.4rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  th {
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  td.rank { font-weight: 700; color: var(--accent); width: 2.5em; }
+  td.boat-name { max-width: 0; width: 100%; }
+  td.time { font-variant-numeric: tabular-nums; text-align: right; }
+  tbody tr:last-child td { border-bottom: none; }
+  .leaderboard-wrap {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+</style>
+</head>
+<body>
+  <h1 id="raceName">Race Control</h1>
+  <div id="stateLabel" class="state-label"></div>
+  <div id="emptyMsg" class="empty" hidden>No active race</div>
+
+  <div id="preStartView" hidden>
+    <div id="countdownValue" class="countdown">--:--:--</div>
+    <div class="start-timer-grid">
+      <div class="start-timer-tile">
+        <div class="start-timer-label">Distance</div>
+        <div id="dtlValue" class="start-timer-value">--</div>
+      </div>
+      <div class="start-timer-tile">
+        <div class="start-timer-label">ETA</div>
+        <div id="etaValue" class="start-timer-value">--:--:--</div>
+      </div>
+      <div class="start-timer-tile">
+        <div class="start-timer-label">Burn</div>
+        <div id="burnValue" class="start-timer-value">--</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="leaderboardView" class="leaderboard-wrap" hidden>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Boat</th><th>Corrected</th></tr>
+      </thead>
+      <tbody id="leaderboardBody"></tbody>
+    </table>
+  </div>
+
+<script>
+(function () {
+  const SK_API = '/signalk/v1/api';
+  const MS_TO_KNOTS = 1.9438444924574;
+  const DATA_POLL_MS = 2000;
+
+  const raceNameEl = document.getElementById('raceName');
+  const stateLabelEl = document.getElementById('stateLabel');
+  const emptyMsg = document.getElementById('emptyMsg');
+  const preStartView = document.getElementById('preStartView');
+  const leaderboardView = document.getElementById('leaderboardView');
+  const countdownValue = document.getElementById('countdownValue');
+  const dtlValue = document.getElementById('dtlValue');
+  const etaValue = document.getElementById('etaValue');
+  const burnValue = document.getElementById('burnValue');
+  const leaderboardBody = document.getElementById('leaderboardBody');
+
+  let race = null; // last-fetched vessels.self.racecontrol value
+  let selfNav = null; // { lat, lon, sogMs }
+
+  function unwrapValue(x) {
+    return x && typeof x === 'object' && 'value' in x ? x.value : x;
+  }
+
+  async function fetchJSON(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.statusText);
+    return res.json();
+  }
+
+  function fmtDuration(ms) {
+    if (ms == null || ms < 0 || !isFinite(ms)) return '--:--:--';
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+
+  function fmtSignedDuration(ms) {
+    const sign = ms < 0 ? '-' : '+';
+    const s = Math.round(Math.abs(ms) / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return sign + (h ? `${h}:${String(m).padStart(2, '0')}` : m) + ':' + String(sec).padStart(2, '0');
+  }
+
+  // Perpendicular distance from a point to the start-line segment (or to its
+  // nearest end) — same flat-earth-local approximation as the main webapp's
+  // start timer (public/app.js's distanceToSegmentNm), so the numbers here
+  // always match what's shown there.
+  function distanceToSegmentNm(p, a, b) {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const meanLat = (a.lat + b.lat + p.lat) / 3;
+    const cosLat = Math.cos(toRad(meanLat)) || 1;
+    const NM_PER_DEG_LAT = 60;
+    const toXY = (pt) => ({ x: pt.lon * cosLat * NM_PER_DEG_LAT, y: pt.lat * NM_PER_DEG_LAT });
+    const P = toXY(p);
+    const A = toXY(a);
+    const B = toXY(b);
+    const abx = B.x - A.x;
+    const aby = B.y - A.y;
+    const lenSq = abx * abx + aby * aby;
+    let t = lenSq > 0 ? ((P.x - A.x) * abx + (P.y - A.y) * aby) / lenSq : 0;
+    t = Math.max(0, Math.min(1, t));
+    const cx = A.x + abx * t;
+    const cy = A.y + aby * t;
+    const dx = P.x - cx;
+    const dy = P.y - cy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  async function fetchRace() {
+    try {
+      const leaf = await fetchJSON(`${SK_API}/vessels/self/racecontrol`);
+      race = unwrapValue(leaf);
+    } catch (e) {
+      race = null;
+    }
+  }
+
+  async function fetchSelfNav() {
+    try {
+      const [posLeaf, sogLeaf] = await Promise.all([
+        fetchJSON(`${SK_API}/vessels/self/navigation/position`).catch(() => null),
+        fetchJSON(`${SK_API}/vessels/self/navigation/speedOverGround`).catch(() => null)
+      ]);
+      const v = posLeaf && posLeaf.value;
+      if (!v || typeof v.latitude !== 'number' || typeof v.longitude !== 'number') {
+        selfNav = null;
+        return;
+      }
+      const sogMs = sogLeaf && typeof sogLeaf.value === 'number' ? sogLeaf.value : null;
+      selfNav = { lat: v.latitude, lon: v.longitude, sogMs };
+    } catch (e) {
+      selfNav = null;
+    }
+  }
+
+  function renderLeaderboard() {
+    leaderboardBody.innerHTML = '';
+    (race.leaderboard || []).forEach((r) => {
+      const tr = document.createElement('tr');
+      const tdRank = document.createElement('td');
+      tdRank.className = 'rank';
+      tdRank.textContent = r.rank == null ? '' : r.rank;
+      const tdName = document.createElement('td');
+      tdName.className = 'boat-name';
+      tdName.textContent = r.sailNumber ? `${r.name} (${r.sailNumber})` : r.name;
+      const tdTime = document.createElement('td');
+      tdTime.className = 'time';
+      tdTime.textContent = fmtDuration(r.correctedMs);
+      tr.append(tdRank, tdName, tdTime);
+      leaderboardBody.appendChild(tr);
+    });
+  }
+
+  function render() {
+    if (!race || race.state === 'none') {
+      raceNameEl.textContent = 'Race Control';
+      stateLabelEl.textContent = '';
+      emptyMsg.hidden = false;
+      preStartView.hidden = true;
+      leaderboardView.hidden = true;
+      return;
+    }
+    emptyMsg.hidden = true;
+    raceNameEl.textContent = race.name || 'Race Control';
+
+    if (race.state === 'started') {
+      stateLabelEl.textContent = 'Racing';
+      preStartView.hidden = true;
+      leaderboardView.hidden = false;
+      renderLeaderboard();
+      return;
+    }
+
+    leaderboardView.hidden = true;
+    preStartView.hidden = false;
+    stateLabelEl.textContent = race.state === 'stopped' ? 'Stopped' : race.state === 'scheduled' ? 'Scheduled' : 'Not started';
+
+    if (!race.scheduledStart) {
+      countdownValue.textContent = '--:--:--';
+      dtlValue.textContent = '--';
+      etaValue.textContent = '--:--:--';
+      burnValue.textContent = '--';
+      burnValue.className = 'start-timer-value';
+      return;
+    }
+    const now = Date.now();
+    const toStartMs = race.scheduledStart - now;
+    countdownValue.textContent = fmtDuration(Math.max(0, toStartMs));
+
+    if (!race.startLine || !selfNav) {
+      dtlValue.textContent = '--';
+      etaValue.textContent = '--:--:--';
+      burnValue.textContent = '--';
+      burnValue.className = 'start-timer-value';
+      return;
+    }
+    const [a, b] = race.startLine;
+    const dtlNm = distanceToSegmentNm(selfNav, a, b);
+    dtlValue.textContent = `${dtlNm.toFixed(2)}nm`;
+
+    if (selfNav.sogMs == null || selfNav.sogMs < 0.25) {
+      etaValue.textContent = '--:--:--';
+      burnValue.textContent = '--';
+      burnValue.className = 'start-timer-value';
+      return;
+    }
+    const sogKn = selfNav.sogMs * MS_TO_KNOTS;
+    const etaMs = (dtlNm / sogKn) * 3600 * 1000;
+    etaValue.textContent = new Date(now + etaMs).toLocaleTimeString();
+
+    const burnMs = toStartMs - etaMs;
+    burnValue.textContent = fmtSignedDuration(burnMs);
+    burnValue.className = 'start-timer-value ' + (burnMs >= 0 ? 'early' : 'late');
+  }
+
+  async function poll() {
+    await Promise.all([fetchRace(), fetchSelfNav()]);
+    render();
+  }
+
+  poll();
+  setInterval(poll, DATA_POLL_MS);
+  setInterval(render, 1000);
+})();
+</script>
+</body>
+</html>

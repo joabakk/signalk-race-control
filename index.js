@@ -1603,6 +1603,12 @@ module.exports = function (app) {
         title:
           'How close (in meters) an AIS-tracked boat must come to a mark for it to count as rounded, for the estimated finish time and remaining-distance calculations',
         default: 100
+      },
+      enableMfdTile: {
+        type: 'boolean',
+        title:
+          'Publish a read-only summary of the current race (countdown, start-timer fields, leaderboard) to the Signal K data model at vessels.self.racecontrol, and enable the mfd-tile.html webapp that reads it — for embedding as a tile on a B&G/Navico MFD via signalk-mfd-plugin, which requires publicly-readable data rather than this plugin\'s own (admin-only) REST API. Off by default.',
+        default: false
       }
     }
   };
@@ -1912,6 +1918,46 @@ module.exports = function (app) {
       });
   }
 
+  // The current race's status, trimmed to just what the read-only MFD tile
+  // needs (no boat ids, course marks, or anything else it doesn't render) —
+  // published into the Signal K data model as a single value (see
+  // publishMfdData), rather than served from this plugin's own admin-only
+  // REST API, so it's reachable without authentication.
+  function currentMfdSnapshot() {
+    const race = getRace(state.currentRaceId);
+    if (!race) return { name: null, state: 'none', leaderboard: [] };
+    const raceState = race.stopTime ? 'stopped' : race.startTime ? 'started' : race.scheduledStart ? 'scheduled' : 'not-started';
+    const leaderboard = race.startTime
+      ? rankedBoatList(race).map((r, i) => ({
+          rank: r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : null,
+          name: r.boat.name,
+          sailNumber: r.boat.sailNumber || null,
+          elapsedMs: r.elapsedMs,
+          correctedMs: r.correctedMs,
+          finished: !!r.boat.finishTime
+        }))
+      : [];
+    return {
+      name: race.name,
+      state: raceState,
+      scheduledStart: race.scheduledStart || null,
+      startTime: race.startTime || null,
+      startLine: race.course && race.course.startLine ? race.course.startLine : null,
+      leaderboard
+    };
+  }
+
+  function publishMfdData() {
+    if (!plugin.options || !plugin.options.enableMfdTile) return;
+    try {
+      app.handleMessage(plugin.id, {
+        updates: [{ source: { label: plugin.id }, values: [{ path: 'racecontrol', value: currentMfdSnapshot() }] }]
+      });
+    } catch (e) {
+      app.debug('race-control: publishMfdData failed: ' + e.message);
+    }
+  }
+
   // SignalK resource ids must be UUIDs (the resources-provider rejects
   // anything else) — this derives one deterministically from a stable seed
   // string, so re-publishing the same course/mark updates the same
@@ -2076,6 +2122,7 @@ module.exports = function (app) {
     // (armCallOffSchedule requires race.startTime) — arm it now instead of
     // discarding it.
     armCallOffSchedule(race);
+    publishMfdData();
   }
 
   // Re-arms (or clears) the timer that auto-starts a race at its
@@ -2116,6 +2163,7 @@ module.exports = function (app) {
       }
     });
     saveState();
+    publishMfdData();
   }
 
   // A race with at least one boat where every boat has either finished or
@@ -2215,7 +2263,9 @@ module.exports = function (app) {
     trackTimer = setInterval(() => {
       recordTrackSample();
       checkStartLineCrossings().catch((e) => app.debug('race-control: checkStartLineCrossings failed: ' + e.message));
+      publishMfdData();
     }, 15000);
+    publishMfdData();
     app.setPluginStatus('Race control ready');
   };
 
@@ -2540,6 +2590,7 @@ module.exports = function (app) {
       }
       saveState();
       armCallOffSchedule(race);
+      publishMfdData();
       res.json(raceWithEstimates(race));
     });
 
@@ -2556,6 +2607,7 @@ module.exports = function (app) {
       race.scheduledStart = t;
       saveState();
       armSchedule(race);
+      publishMfdData();
       res.json(raceWithEstimates(race));
     });
 
@@ -2565,6 +2617,7 @@ module.exports = function (app) {
       race.scheduledStart = null;
       saveState();
       armSchedule(race);
+      publishMfdData();
       res.json(raceWithEstimates(race));
     });
 
@@ -2589,6 +2642,7 @@ module.exports = function (app) {
         b.dnfPosition = null;
       });
       saveState();
+      publishMfdData();
       res.json(raceWithEstimates(race));
     });
 
@@ -2622,6 +2676,7 @@ module.exports = function (app) {
         }
       });
       saveState();
+      publishMfdData();
       res.json(raceWithEstimates(race));
     });
 
