@@ -1,12 +1,15 @@
 {
   "name": "signalk-race-control",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "SignalK plugin and webapp for tracking elapsed and handicap-corrected (Time-on-Time) race time, with a per-boat editable TCF and boat names pulled from AIS when available.",
   "main": "index.js",
   "author": "Joachim Bakke <github@heiamoss.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/joabakk/signalk-race-control.git"
+  },
+  "signalk": {
+    "appIcon": "favicon.svg"
   },
   "keywords": [
     "signalk-node-server-plugin",
