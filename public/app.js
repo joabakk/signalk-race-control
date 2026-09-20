@@ -1,6 +1,7 @@
 (function () {
   const API = '/plugins/race-control';
   const SK_API = '/signalk/v1/api';
+  const SK_API_V2 = '/signalk/v2/api';
 
   let races = []; // race summaries from GET /races
   let activeRaceId = null;
@@ -85,6 +86,8 @@
   const addBoatRow = document.getElementById('addBoatRow');
   const addBoatName = document.getElementById('addBoatName');
   const addBoatClass = document.getElementById('addBoatClass');
+  const addBoatBuddyLabel = document.getElementById('addBoatBuddyLabel');
+  const addBoatBuddy = document.getElementById('addBoatBuddy');
   const addBoatBtn = document.getElementById('addBoatBtn');
   const classSection = document.getElementById('classSection');
   const classToggleBtn = document.getElementById('classToggleBtn');
@@ -349,6 +352,7 @@
 
   function selectSuggestion(item) {
     addBoatName.value = item.name;
+    addBoatBuddyLabel.hidden = !findMmsiByName(item.name);
     hideSuggestions();
     addBoatName.focus();
   }
@@ -812,6 +816,7 @@
     // per boat afterward, in the table row.
     const mmsi = findMmsiByName(name);
     const classId = addBoatClass.value || null;
+    const addAsBuddy = addBoatBuddy.checked && !!mmsi;
     try {
       const boat = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/boats`, {
         method: 'POST',
@@ -820,10 +825,29 @@
       });
       raceState.boats[boat.id] = boat;
       addBoatName.value = '';
+      addBoatBuddyLabel.hidden = true;
       addBoatName.focus();
       render();
+      if (addAsBuddy) addBuddy(mmsi, name);
     } catch (e) {
       setStatus(e.message, true);
+    }
+  }
+
+  // Best-effort registration with the (optional, third-party)
+  // signalk-buddylist-plugin, so the boat's AIS target is labeled/highlighted
+  // for other Signal K clients too. Never blocks adding the boat itself —
+  // the plugin may not be installed at all, which shows up as a 404 here.
+  async function addBuddy(mmsi, name) {
+    try {
+      await fetchJSON(`${SK_API_V2}/resources/buddies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urn: `urn:mrn:imo:mmsi:${mmsi}`, name })
+      });
+    } catch (e) {
+      const reason = e.status === 404 ? 'buddy list plugin not installed' : e.message;
+      setStatus(`Boat added (buddy list: ${reason})`, true);
     }
   }
 
@@ -3227,7 +3251,10 @@
     hideSuggestions();
     addBoat();
   });
-  addBoatName.addEventListener('input', () => showSuggestionsFor(addBoatName.value));
+  addBoatName.addEventListener('input', () => {
+    showSuggestionsFor(addBoatName.value);
+    addBoatBuddyLabel.hidden = !findMmsiByName(addBoatName.value);
+  });
   addBoatName.addEventListener('focus', () => {
     if (addBoatName.value.trim()) showSuggestionsFor(addBoatName.value);
   });
