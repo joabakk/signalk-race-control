@@ -963,7 +963,7 @@
       const ts =
         raceState && raceState.multiDay
           ? dateTimeInputValueToTs(startTimeInput.value)
-          : timeInputValueToTs(startTimeInput.value, (raceState && raceState.startTime) || Date.now(), false);
+          : timeInputValueToTs(startTimeInput.value, (raceState && (raceState.startTime || raceState.scheduledStart)) || Date.now(), false);
       setClassStartTime(cls.id, ts);
     });
 
@@ -1008,10 +1008,13 @@
       if (document.activeElement !== refs.startTimeInput) {
         refs.startTimeInput.value = raceState.multiDay ? tsToDateTimeInputValue(cls.startTime) : tsToTimeInputValue(cls.startTime);
       }
-      const canSetClassStart = !!raceState.startTime;
-      refs.startTimeInput.disabled = !canSetClassStart;
-      refs.nowBtn.disabled = !canSetClassStart;
-      refs.clearBtn.disabled = !canSetClassStart || !cls.startTime;
+      // Editable any time, including before the race starts — a time-only
+      // entry then lands on the scheduled start's day (all classes start
+      // the same day), and classes may share a start time. "Now" only
+      // makes sense once the race is actually running.
+      refs.startTimeInput.disabled = false;
+      refs.nowBtn.disabled = !raceState.startTime;
+      refs.clearBtn.disabled = !cls.startTime;
     });
     Array.from(classRowRefs.keys()).forEach((id) => {
       if (!seenIds.has(id)) {
