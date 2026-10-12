@@ -229,7 +229,9 @@ and a live projected finishing order — during and after the race.
   finishing instantly), or the current corrected-time gap if both are still racing or
   both have finished. With no boat marked self, the column instead compares everyone
   against the current **leader** (tagged accordingly), so it's never just blank.
-- **Export to Excel** — a genuine `.xlsx` snapshot of the current standings (same
+- **Export to Excel** — a genuine `.xlsx` snapshot of the current standings, with one
+  worksheet per class (each ranked on its own; boats with no class go on a "No class"
+  sheet, and a race with no classes gets a single "Results" sheet) (same
   ranking, same rows as the on-screen table: rank, boat, sail number, MMSI, TCF, start
   time, finish time, elapsed, corrected, status), with the time columns rendered in
   your browser's own timezone rather than the server's (and with the date included,

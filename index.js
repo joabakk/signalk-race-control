@@ -2400,28 +2400,12 @@ module.exports = function (app) {
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Race Control';
       workbook.created = new Date();
-      const sheet = workbook.addWorksheet('Results');
-
-      const titleRow = sheet.addRow([race.name]);
-      sheet.mergeCells(titleRow.number, 1, titleRow.number, headers.length);
-      titleRow.getCell(1).font = { bold: true, size: 14 };
 
       const statusLine = race.stopTime
         ? `Called off ${formatLocalDateTime(race.stopTime, tz)}`
         : race.startTime
           ? `Started ${formatLocalDateTime(race.startTime, tz)}`
           : 'Not started';
-      const infoRow = sheet.addRow([statusLine]);
-      sheet.mergeCells(infoRow.number, 1, infoRow.number, headers.length);
-      infoRow.getCell(1).font = { italic: true, color: { argb: 'FF64748B' } };
-
-      sheet.addRow([]);
-
-      const headerRow = sheet.addRow(headers);
-      headerRow.font = { bold: true };
-      headerRow.eachCell((cell) => {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-      });
 
       // Real Excel date/time values in Start/Finish (shifted the same way
       // formatLocalDateTime above does, to display as the exporting
@@ -2435,43 +2419,92 @@ module.exports = function (app) {
       // that would just sit there, wrong, once the file is reopened later.
       const dateNumFmt = race.multiDay ? 'yyyy-mm-dd hh:mm:ss' : 'hh:mm:ss';
       const durationNumFmt = '[h]:mm:ss';
-      ranked.forEach((r, i) => {
-        const status = r.boat.dns
-          ? 'DNS'
-          : r.boat.dnf
-            ? 'DNF'
-            : r.boat.finishTime
-              ? 'Finished'
-              : race.startTime
-                ? 'Racing'
-                : 'Not started';
-        const rankLabel = r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : '';
-        const start = effectiveStartTime(race, r.boat);
-        const startDate = start != null ? new Date(start - tz * 60000) : null;
-        const finishDate = r.boat.finishTime != null ? new Date(r.boat.finishTime - tz * 60000) : null;
-        const rowNum = headerRow.number + 1 + i;
-        const row = sheet.addRow([
-          rankLabel,
-          r.boat.name,
-          r.boat.sailNumber || '',
-          r.boat.mmsi || '',
-          r.boat.tcf,
-          startDate,
-          finishDate,
-          { formula: `IF(OR(F${rowNum}="",G${rowNum}=""),"",G${rowNum}-F${rowNum})` },
-          { formula: `IF(H${rowNum}="","",H${rowNum}*E${rowNum})` },
-          status
-        ]);
-        row.getCell(6).numFmt = dateNumFmt;
-        row.getCell(7).numFmt = dateNumFmt;
-        row.getCell(8).numFmt = durationNumFmt;
-        row.getCell(9).numFmt = durationNumFmt;
-      });
 
-      const widths = [7, 24, 12, 12, 8, race.multiDay ? 17 : 12, race.multiDay ? 17 : 12, 12, 12, 12];
-      widths.forEach((w, i) => {
-        sheet.getColumn(i + 1).width = w;
-      });
+      // One worksheet per class, each ranked on its own (the global order
+      // from rankedBoatList is preserved within a class, so DNF/DNS/unranked
+      // boats still trail). A race with no classes keeps the single
+      // "Results" sheet.
+      const usedSheetNames = new Set();
+      const uniqueSheetName = (raw) => {
+        // Excel sheet names: max 31 chars, none of : \ / ? * [ ], unique.
+        const base = (String(raw).replace(/[:\\/?*\[\]]/g, ' ').replace(/\s+/g, ' ').trim() || 'Class').slice(0, 31);
+        let name = base;
+        for (let n = 2; usedSheetNames.has(name.toLowerCase()); n++) {
+          const suffix = ` (${n})`;
+          name = base.slice(0, 31 - suffix.length) + suffix;
+        }
+        usedSheetNames.add(name.toLowerCase());
+        return name;
+      };
+
+      const addResultsSheet = (sheetName, title, entries) => {
+        const sheet = workbook.addWorksheet(uniqueSheetName(sheetName));
+
+        const titleRow = sheet.addRow([title]);
+        sheet.mergeCells(titleRow.number, 1, titleRow.number, headers.length);
+        titleRow.getCell(1).font = { bold: true, size: 14 };
+
+        const infoRow = sheet.addRow([statusLine]);
+        sheet.mergeCells(infoRow.number, 1, infoRow.number, headers.length);
+        infoRow.getCell(1).font = { italic: true, color: { argb: 'FF64748B' } };
+
+        sheet.addRow([]);
+
+        const headerRow = sheet.addRow(headers);
+        headerRow.font = { bold: true };
+        headerRow.eachCell((cell) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        });
+
+        entries.forEach((r, i) => {
+          const status = r.boat.dns
+            ? 'DNS'
+            : r.boat.dnf
+              ? 'DNF'
+              : r.boat.finishTime
+                ? 'Finished'
+                : race.startTime
+                  ? 'Racing'
+                  : 'Not started';
+          const rankLabel = r.boat.dns ? 'DNS' : r.boat.dnf ? 'DNF' : r.rankMs != null ? i + 1 : '';
+          const start = effectiveStartTime(race, r.boat);
+          const startDate = start != null ? new Date(start - tz * 60000) : null;
+          const finishDate = r.boat.finishTime != null ? new Date(r.boat.finishTime - tz * 60000) : null;
+          const rowNum = headerRow.number + 1 + i;
+          const row = sheet.addRow([
+            rankLabel,
+            r.boat.name,
+            r.boat.sailNumber || '',
+            r.boat.mmsi || '',
+            r.boat.tcf,
+            startDate,
+            finishDate,
+            { formula: `IF(OR(F${rowNum}="",G${rowNum}=""),"",G${rowNum}-F${rowNum})` },
+            { formula: `IF(H${rowNum}="","",H${rowNum}*E${rowNum})` },
+            status
+          ]);
+          row.getCell(6).numFmt = dateNumFmt;
+          row.getCell(7).numFmt = dateNumFmt;
+          row.getCell(8).numFmt = durationNumFmt;
+          row.getCell(9).numFmt = durationNumFmt;
+        });
+
+        const widths = [7, 24, 12, 12, 8, race.multiDay ? 17 : 12, race.multiDay ? 17 : 12, 12, 12, 12];
+        widths.forEach((w, i) => {
+          sheet.getColumn(i + 1).width = w;
+        });
+      };
+
+      const classes = race.classes || [];
+      if (!classes.length) {
+        addResultsSheet('Results', race.name, ranked);
+      } else {
+        classes.forEach((cls) => {
+          addResultsSheet(cls.name, `${race.name} — ${cls.name}`, ranked.filter((r) => r.boat.classId === cls.id));
+        });
+        const unclassed = ranked.filter((r) => !r.boat.classId);
+        if (unclassed.length) addResultsSheet('No class', `${race.name} — No class`, unclassed);
+      }
 
       const safeName = (race.name || 'race').replace(/[^a-z0-9\-_]+/gi, '_').slice(0, 60) || 'race';
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

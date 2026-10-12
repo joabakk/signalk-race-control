@@ -326,3 +326,83 @@ describe('/overpass proxy — falls back across mirrors', () => {
     assert.deepEqual(res.body.elements, []);
   });
 });
+
+describe('GET /races/:id/export.xlsx — split by class', () => {
+  const ExcelJS = require('exceljs');
+  const { Writable } = require('node:stream');
+  let plugin;
+  let router;
+
+  before(() => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'race-control-test-'));
+    plugin = pluginFactory(makeApp(dataDir));
+    plugin.start({});
+    router = makeRouter();
+    plugin.registerWithRouter(router);
+  });
+
+  after(() => {
+    plugin.stop();
+  });
+
+  // The export streams a workbook into `res`; collect it and re-read it.
+  async function exportWorkbook(raceId) {
+    const route = router._routes.find((r) => r.method === 'GET' && r.pattern.test(`/races/${raceId}/export.xlsx`));
+    const chunks = [];
+    const res = new Writable({
+      write(chunk, _enc, cb) {
+        chunks.push(Buffer.from(chunk));
+        cb();
+      }
+    });
+    res.setHeader = () => {};
+    res.status = () => res;
+    res.json = () => {};
+    const done = new Promise((resolve) => res.on('finish', resolve));
+    await route.handler({ params: { id: raceId }, query: { tzOffsetMinutes: '0' }, body: {} }, res);
+    await done;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.concat(chunks));
+    return wb;
+  }
+
+  const boatNames = (sheet) => {
+    const names = [];
+    sheet.eachRow((row, n) => {
+      if (n > 4) names.push(row.getCell(2).value);
+    });
+    return names;
+  };
+
+  test('a race with no classes exports a single Results sheet', async () => {
+    const created = await call(router, 'POST', '/races', { body: { name: 'Plain' } });
+    const id = created.body.race.id;
+    await call(router, 'POST', `/races/${id}/boats`, { body: { name: 'Alpha' } });
+    const wb = await exportWorkbook(id);
+    assert.deepEqual(wb.worksheets.map((w) => w.name), ['Results']);
+    assert.deepEqual(boatNames(wb.getWorksheet('Results')), ['Alpha']);
+  });
+
+  test('a race with classes exports one sheet per class, ranked within it', async () => {
+    const created = await call(router, 'POST', '/races', { body: { name: 'Split' } });
+    const id = created.body.race.id;
+    const classA = (await call(router, 'POST', `/races/${id}/classes`, { body: { name: 'Cruisers' } })).body.classes[0];
+    const classes = (await call(router, 'POST', `/races/${id}/classes`, { body: { name: 'Racers: 1/2' } })).body.classes;
+    const classB = classes[1];
+    const add = async (name, classId) => {
+      const b = (await call(router, 'POST', `/races/${id}/boats`, { body: { name } })).body;
+      if (classId) await call(router, 'PUT', `/races/${id}/boats/${b.id}/class`, { body: { classId } });
+    };
+    await add('A1', classA.id);
+    await add('A2', classA.id);
+    await add('B1', classB.id);
+    await add('Loner', null);
+
+    const wb = await exportWorkbook(id);
+    assert.deepEqual(wb.worksheets.map((w) => w.name), ['Cruisers', 'Racers 1 2', 'No class']);
+    assert.deepEqual(boatNames(wb.getWorksheet('Cruisers')).sort(), ['A1', 'A2']);
+    assert.deepEqual(boatNames(wb.getWorksheet('Racers 1 2')), ['B1']);
+    assert.deepEqual(boatNames(wb.getWorksheet('No class')), ['Loner']);
+    assert.match(wb.getWorksheet('Cruisers').getCell(1, 1).value, /Split — Cruisers/);
+  });
+});
