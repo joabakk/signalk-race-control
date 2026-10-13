@@ -17,6 +17,9 @@
     --bad: #f87171;
   }
   * { box-sizing: border-box; }
+  /* Elements that set their own `display` would otherwise override the
+     `hidden` attribute's UA-stylesheet `display: none`. */
+  [hidden] { display: none !important; }
   html, body {
     margin: 0;
     height: 100%;
