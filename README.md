@@ -265,11 +265,11 @@ and a live projected finishing order — during and after the race.
 
 ## Install
 
-Install this directory's dependencies once (needed for the Excel export), then copy
-(or symlink) it into your SignalK server's `node_modules`, e.g.:
+The easiest way is the SignalK **App Store** (or `npm install signalk-race-control`).
+The plugin has no runtime dependencies, so a checkout also works as-is — copy (or
+symlink) it into your SignalK server's `node_modules`, e.g.:
 
 ```bash
-cd /path/to/race-control && npm install
 cd ~/.signalk/node_modules
 ln -s /path/to/race-control signalk-race-control
 ```

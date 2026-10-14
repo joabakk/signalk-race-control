@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const ExcelJS = require('exceljs');
+const xlsx = require('./xlsx');
 
 const DEFAULT_HANDICAP_SOURCE_PAGE = 'https://ssca.no/aktiviteter/vet-tall';
 const HANDICAP_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -2397,9 +2397,7 @@ module.exports = function (app) {
       const ranked = rankedBoatList(race);
       const headers = ['Rank', 'Boat', 'Sail Number', 'MMSI', 'TCF', 'Start Time', 'Finish Time', 'Elapsed', 'Corrected', 'Status'];
 
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = 'Race Control';
-      workbook.created = new Date();
+      const workbook = xlsx.createWorkbook();
 
       const statusLine = race.stopTime
         ? `Called off ${formatLocalDateTime(race.stopTime, tz)}`
@@ -2437,24 +2435,19 @@ module.exports = function (app) {
         return name;
       };
 
+      const DAY_MS = 86400000;
       const addResultsSheet = (sheetName, title, entries) => {
         const sheet = workbook.addWorksheet(uniqueSheetName(sheetName));
 
-        const titleRow = sheet.addRow([title]);
-        sheet.mergeCells(titleRow.number, 1, titleRow.number, headers.length);
-        titleRow.getCell(1).font = { bold: true, size: 14 };
+        const titleRow = sheet.addRow([{ value: title, font: { bold: true, size: 14 } }]);
+        sheet.mergeCells(titleRow, 1, titleRow, headers.length);
 
-        const infoRow = sheet.addRow([statusLine]);
-        sheet.mergeCells(infoRow.number, 1, infoRow.number, headers.length);
-        infoRow.getCell(1).font = { italic: true, color: { argb: 'FF64748B' } };
+        const infoRow = sheet.addRow([{ value: statusLine, font: { italic: true, color: 'FF64748B' } }]);
+        sheet.mergeCells(infoRow, 1, infoRow, headers.length);
 
         sheet.addRow([]);
 
-        const headerRow = sheet.addRow(headers);
-        headerRow.font = { bold: true };
-        headerRow.eachCell((cell) => {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-        });
+        const headerRow = sheet.addRow(headers, { font: { bold: true }, fill: 'FFE2E8F0' });
 
         entries.forEach((r, i) => {
           const status = r.boat.dns
@@ -2470,29 +2463,26 @@ module.exports = function (app) {
           const start = effectiveStartTime(race, r.boat);
           const startDate = start != null ? new Date(start - tz * 60000) : null;
           const finishDate = r.boat.finishTime != null ? new Date(r.boat.finishTime - tz * 60000) : null;
-          const rowNum = headerRow.number + 1 + i;
-          const row = sheet.addRow([
+          const rowNum = headerRow + 1 + i;
+          // Cached results alongside the formulas, for viewers that don't
+          // recalculate on open.
+          const elapsedDays = start != null && r.boat.finishTime != null ? (r.boat.finishTime - start) / DAY_MS : null;
+          sheet.addRow([
             rankLabel,
             r.boat.name,
             r.boat.sailNumber || '',
             r.boat.mmsi || '',
             r.boat.tcf,
-            startDate,
-            finishDate,
-            { formula: `IF(OR(F${rowNum}="",G${rowNum}=""),"",G${rowNum}-F${rowNum})` },
-            { formula: `IF(H${rowNum}="","",H${rowNum}*E${rowNum})` },
+            { value: startDate, numFmt: dateNumFmt },
+            { value: finishDate, numFmt: dateNumFmt },
+            { formula: `IF(OR(F${rowNum}="",G${rowNum}=""),"",G${rowNum}-F${rowNum})`, value: elapsedDays == null ? '' : elapsedDays, numFmt: durationNumFmt },
+            { formula: `IF(H${rowNum}="","",H${rowNum}*E${rowNum})`, value: elapsedDays == null ? "" : elapsedDays * (r.boat.tcf != null ? r.boat.tcf : 1), numFmt: durationNumFmt },
             status
           ]);
-          row.getCell(6).numFmt = dateNumFmt;
-          row.getCell(7).numFmt = dateNumFmt;
-          row.getCell(8).numFmt = durationNumFmt;
-          row.getCell(9).numFmt = durationNumFmt;
         });
 
         const widths = [7, 24, 12, 12, 8, race.multiDay ? 17 : 12, race.multiDay ? 17 : 12, 12, 12, 12];
-        widths.forEach((w, i) => {
-          sheet.getColumn(i + 1).width = w;
-        });
+        widths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
       };
 
       const classes = race.classes || [];
@@ -2510,8 +2500,7 @@ module.exports = function (app) {
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}-results.xlsx"`);
       try {
-        await workbook.xlsx.write(res);
-        res.end();
+        res.end(workbook.toBuffer());
       } catch (e) {
         app.error('race-control: failed to generate xlsx export: ' + e.message);
         if (!res.headersSent) res.status(500).json({ error: 'Could not generate export' });

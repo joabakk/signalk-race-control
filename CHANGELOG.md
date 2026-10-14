@@ -2,6 +2,9 @@
 
 All notable changes to `signalk-race-control`, newest first.
 
+## 0.12.10 (2026-10-14)
+- Drop the `exceljs` dependency: the Excel export now uses a small built-in `.xlsx` writer, so the plugin has no runtime dependencies (and no `npm audit` findings for installers). `overrides` only apply to the project that declares them, so the earlier `uuid` override never protected installed copies
+
 ## 0.12.9 (2026-10-13)
 - Patch `brace-expansion` (via `exceljs`) to fix the npm audit finding
 - Fix the MFD tile showing "No active race" over a live race (its stylesheet ignored the `hidden` attribute)
