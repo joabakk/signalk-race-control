@@ -683,16 +683,22 @@
     // A single-day race only needs a time — "today" (rolling to tomorrow
     // if that time's already passed, since this is scheduling something
     // ahead) is the only sensible date for a call-off anyway.
-    const ts = raceState && raceState.multiDay ? dateTimeInputValueToTs(callOffInput.value) : timeInputValueToTs(callOffInput.value, Date.now(), true);
+    // Once the race is already called off the same input corrects that
+    // call-off's time instead, so a time-only entry is read against the
+    // race's own start (rolling over midnight if it's earlier), not "today".
+    const stopped = !!(raceState && raceState.stopTime);
+    const ts = raceState && raceState.multiDay
+      ? dateTimeInputValueToTs(callOffInput.value)
+      : timeInputValueToTs(callOffInput.value, stopped ? raceState.startTime : Date.now(), true);
     if (!isFinite(ts)) {
       setStatus('Invalid call-off time.', true);
       return;
     }
     try {
-      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/schedule-call-off`, {
-        method: 'POST',
+      raceState = await fetchJSON(`${API}/races/${encodeURIComponent(activeRaceId)}/${stopped ? 'stopTime' : 'schedule-call-off'}`, {
+        method: stopped ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ time: ts })
+        body: JSON.stringify(stopped ? { stopTime: ts } : { time: ts })
       });
       render();
     } catch (e) {
@@ -3037,11 +3043,17 @@
     cancelScheduleBtn.hidden = !raceState.scheduledStart || !!raceState.startTime;
 
     callOffInput.type = raceState.multiDay ? 'datetime-local' : 'time';
-    callOffInput.disabled = !!raceState.stopTime;
-    scheduleCallOffBtn.disabled = !!raceState.stopTime;
-    scheduleCallOffBtn.textContent = raceState.scheduledCallOff
-      ? 'Call-off: ' + new Date(raceState.scheduledCallOff).toLocaleTimeString()
-      : 'Schedule Call-off';
+    // Stays usable after the call-off: then it shows, and corrects, the time
+    // the race was actually called off.
+    if (document.activeElement !== callOffInput) {
+      const shown = raceState.stopTime || raceState.scheduledCallOff;
+      if (shown) callOffInput.value = raceState.multiDay ? tsToDateTimeInputValue(shown) : tsToTimeInputValue(shown);
+    }
+    scheduleCallOffBtn.textContent = raceState.stopTime
+      ? 'Set call-off time'
+      : raceState.scheduledCallOff
+        ? 'Call-off: ' + new Date(raceState.scheduledCallOff).toLocaleTimeString()
+        : 'Schedule Call-off';
     cancelCallOffBtn.hidden = !raceState.scheduledCallOff || !!raceState.stopTime;
 
     const boats = boatList();
@@ -3184,27 +3196,33 @@
         row.tdVsSelf.title = `Corrected-time gap to the ${who} (positive = ${who} ahead)`;
       }
 
-      row.finishNormalWrap.hidden = b.dnf || b.dns;
+      // The finish time stays editable whatever the boat's status — even for
+      // a boat a call-off marked DNF (a real finish supersedes the DNF on the
+      // server), so results can be corrected after the fact. Only a DNS
+      // boat in a race that hasn't started has nothing to enter yet.
+      const canFinish = !!raceState.startTime;
+      row.finishNormalWrap.hidden = b.dns && !canFinish;
       row.dnfWrap.hidden = !b.dnf;
       row.dnsWrap.hidden = !b.dns;
       if (b.dnf) {
         row.dnfPosSpan.textContent = b.dnfPosition
           ? `at ${b.dnfPosition.lat.toFixed(4)}°, ${b.dnfPosition.lon.toFixed(4)}°`
           : 'position unknown';
-      } else if (!b.dns) {
-        if (document.activeElement !== row.finishTimeInput) {
-          row.finishTimeInput.value = raceState.multiDay
-            ? tsToDateTimeInputValue(b.finishTime)
-            : tsToTimeInputValue(b.finishTime);
-        }
-        const canFinish = !!raceState.startTime;
-        row.finishTimeInput.disabled = !canFinish;
-        row.finishNowBtn.disabled = !canFinish;
-        row.finishClearBtn.disabled = !canFinish || !b.finishTime;
-        row.finishDnfBtn.disabled = !canFinish;
-        // DNS (unlike DNF) is meaningful before the race has even started —
-        // it's how a known no-show gets recorded — so it's never disabled.
       }
+      if (document.activeElement !== row.finishTimeInput) {
+        row.finishTimeInput.value = raceState.multiDay
+          ? tsToDateTimeInputValue(b.finishTime)
+          : tsToTimeInputValue(b.finishTime);
+      }
+      row.finishTimeInput.disabled = !canFinish;
+      row.finishNowBtn.disabled = !canFinish;
+      row.finishClearBtn.disabled = !canFinish || !b.finishTime;
+      // The DNF/DNS buttons only make sense for a boat not already marked.
+      // DNS (unlike DNF) is meaningful before the race has even started —
+      // it's how a known no-show gets recorded — so it's never disabled.
+      row.finishDnfBtn.hidden = b.dnf || b.dns;
+      row.finishDnfBtn.disabled = !canFinish;
+      row.finishDnsBtn.hidden = b.dnf || b.dns;
     });
 
     const seen = new Set(boats.map((b) => b.boatId));

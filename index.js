@@ -2140,6 +2140,23 @@ module.exports = function (app) {
     }
   }
 
+  // A race whose scheduled start has passed without anyone touching it is
+  // taken to have started at that moment, and one whose scheduled call-off
+  // has passed to have been called off then. The armSchedule /
+  // armCallOffSchedule timers normally do this on their own; this is the
+  // backstop for when they didn't get to (a timer lost to a long suspend, a
+  // plugin restart mid-window), run on the periodic tick and whenever a race
+  // is read, so no client ever sees an overdue race still sitting at
+  // "scheduled" or "racing". The start is settled first, so a race that is
+  // overdue on both counts ends up started and then called off.
+  function settleOverdueSchedules() {
+    const now = Date.now();
+    Object.values(state.races).forEach((race) => {
+      if (!race.startTime && race.scheduledStart && race.scheduledStart <= now) doStart(race, race.scheduledStart);
+      if (race.startTime && !race.stopTime && race.scheduledCallOff && race.scheduledCallOff <= now) doStop(race, race.scheduledCallOff);
+    });
+  }
+
   function disarmCallOffSchedule(raceId) {
     const t = callOffTimers.get(raceId);
     if (t) {
@@ -2262,6 +2279,7 @@ module.exports = function (app) {
     });
     trackTimer = setInterval(() => {
       recordTrackSample();
+      settleOverdueSchedules();
       checkStartLineCrossings().catch((e) => app.debug('race-control: checkStartLineCrossings failed: ' + e.message));
       publishMfdData();
     }, 15000);
@@ -2282,6 +2300,7 @@ module.exports = function (app) {
 
   plugin.registerWithRouter = function (router) {
     router.get('/races', (req, res) => {
+      settleOverdueSchedules();
       const races = state.order.map((id) => raceSummary(state.races[id])).filter(Boolean);
       res.json({ currentRaceId: state.currentRaceId, races });
     });
@@ -2380,6 +2399,7 @@ module.exports = function (app) {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
+      settleOverdueSchedules();
       res.json(raceWithEstimates(race));
     });
 
@@ -2697,6 +2717,23 @@ module.exports = function (app) {
           boat.dnfPosition = null;
         }
       });
+      saveState();
+      publishMfdData();
+      res.json(raceWithEstimates(race));
+    });
+
+    // Corrects the time of a call-off that has already happened (the clock
+    // freezes at that time instead). Boats the call-off marked DNF stay so;
+    // finishing them is a separate correction.
+    router.put('/races/:id/stopTime', (req, res) => {
+      const race = getRace(req.params.id);
+      if (!race) return res.status(404).json({ error: 'No such race' });
+      if (!race.stopTime) return res.status(400).json({ error: 'Race is not called off' });
+      const t = Number(req.body && req.body.stopTime);
+      if (!isFinite(t) || t <= race.startTime) {
+        return res.status(400).json({ error: 'stopTime must be an epoch-millisecond timestamp after the race start' });
+      }
+      race.stopTime = t;
       saveState();
       publishMfdData();
       res.json(raceWithEstimates(race));

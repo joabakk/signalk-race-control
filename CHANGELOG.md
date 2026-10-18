@@ -2,6 +2,12 @@
 
 All notable changes to `signalk-race-control`, newest first.
 
+## 0.12.11 (2026-10-18)
+- A scheduled race whose start time has passed untouched is now taken as started at that time (backstop to the start timer, checked every tick and whenever a race is read)
+- A scheduled call-off whose time has passed untouched is likewise taken as having happened at that time
+- The time of a call-off that already happened can be corrected (the call-off box stays usable and shows it; new `PUT /races/:id/stopTime`)
+- Finish times can be entered or corrected after a call-off, including for boats the call-off marked DNF (a real finish supersedes the DNF); the DNF/DNS buttons hide once a boat is already marked
+
 ## 0.12.10 (2026-10-14)
 - Drop the `exceljs` dependency: the Excel export now uses a small built-in `.xlsx` writer, so the plugin has no runtime dependencies (and no `npm audit` findings for installers). `overrides` only apply to the project that declares them, so the earlier `uuid` override never protected installed copies
 

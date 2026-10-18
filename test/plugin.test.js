@@ -406,3 +406,96 @@ describe('GET /races/:id/export.xlsx — split by class', () => {
     assert.match(wb.getWorksheet('Cruisers').getCell(1, 1).value, /Split — Cruisers/);
   });
 });
+
+describe('after-the-fact corrections', () => {
+  let plugin;
+  let router;
+
+  before(() => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'race-control-test-'));
+    plugin = pluginFactory(makeApp(dataDir));
+    plugin.start({});
+    router = makeRouter();
+    plugin.registerWithRouter(router);
+  });
+
+  after(() => {
+    plugin.stop();
+  });
+
+  test('an overdue scheduled start is taken as started at the scheduled time when the race is read', async () => {
+    const id = (await call(router, 'POST', '/races', { body: { name: 'Overdue' } })).body.race.id;
+    const scheduled = Date.now() + 3600 * 1000;
+    await call(router, 'POST', `/races/${id}/schedule`, { body: { startTime: scheduled } });
+    assert.equal((await call(router, 'GET', `/races/${id}`)).body.startTime, null);
+
+    // The armed timer is an hour out; jump the clock past it without it
+    // ever firing, as if it had been lost to a long suspend.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 2 * 3600 * 1000;
+    try {
+      const race = (await call(router, 'GET', `/races/${id}`)).body;
+      assert.equal(race.startTime, scheduled);
+      assert.equal(race.scheduledStart, null);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test('an overdue scheduled call-off is taken as called off at that time, DNF-ing unfinished boats', async () => {
+    const id = (await call(router, 'POST', '/races', { body: { name: 'Overdue call-off' } })).body.race.id;
+    const boat = (await call(router, 'POST', `/races/${id}/boats`, { body: { name: 'Still out' } })).body;
+    const started = (await call(router, 'POST', `/races/${id}/start`)).body;
+    const callOff = Date.now() + 3600 * 1000;
+    await call(router, 'POST', `/races/${id}/schedule-call-off`, { body: { time: callOff } });
+    assert.equal((await call(router, 'GET', `/races/${id}`)).body.stopTime, null);
+
+    const realNow = Date.now;
+    Date.now = () => realNow() + 2 * 3600 * 1000;
+    try {
+      const race = (await call(router, 'GET', `/races/${id}`)).body;
+      assert.equal(race.stopTime, callOff);
+      assert.equal(race.boats[boat.id].dnf, true);
+      assert.equal(race.startTime, started.startTime);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test('the time of a call-off that already happened can be corrected', async () => {
+    const id = (await call(router, 'POST', '/races', { body: { name: 'Fix call-off' } })).body.race.id;
+    await call(router, 'POST', `/races/${id}/boats`, { body: { name: 'B' } });
+    const notStopped = await call(router, 'PUT', `/races/${id}/stopTime`, { body: { stopTime: Date.now() } });
+    assert.equal(notStopped.status, 400);
+
+    const started = (await call(router, 'POST', `/races/${id}/start`)).body;
+    await call(router, 'POST', `/races/${id}/stop`);
+    const bad = await call(router, 'PUT', `/races/${id}/stopTime`, { body: { stopTime: started.startTime - 1000 } });
+    assert.equal(bad.status, 400);
+
+    const later = started.startTime + 2 * 3600 * 1000;
+    const fixed = await call(router, 'PUT', `/races/${id}/stopTime`, { body: { stopTime: later } });
+    assert.equal(fixed.status, 200);
+    assert.equal(fixed.body.stopTime, later);
+    assert.equal((await call(router, 'GET', `/races/${id}`)).body.stopTime, later);
+  });
+
+  test('a finish time can still be entered, and TCF changed, after a call-off — superseding the call-off DNF', async () => {
+    const id = (await call(router, 'POST', '/races', { body: { name: 'Called off' } })).body.race.id;
+    const boat = (await call(router, 'POST', `/races/${id}/boats`, { body: { name: 'Late finisher' } })).body;
+    await call(router, 'POST', `/races/${id}/start`);
+    const stopped = (await call(router, 'POST', `/races/${id}/stop`)).body;
+    assert.ok(stopped.stopTime);
+    assert.equal(stopped.boats[boat.id].dnf, true);
+
+    const finish = stopped.startTime + 90 * 60 * 1000;
+    const fixed = (await call(router, 'PUT', `/races/${id}/boats/${boat.id}/finishTime`, { body: { finishTime: finish } })).body;
+    assert.equal(fixed.finishTime, finish);
+    assert.equal(fixed.dnf, false);
+    assert.equal((await call(router, 'PUT', `/races/${id}/boats/${boat.id}/tcf`, { body: { tcf: 0.95 } })).body.tcf, 0.95);
+
+    const after = (await call(router, 'GET', `/races/${id}`)).body;
+    assert.ok(after.stopTime, 'the race stays called off');
+    assert.equal(after.boats[boat.id].finishTime, finish);
+  });
+});
