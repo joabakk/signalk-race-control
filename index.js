@@ -2299,7 +2299,17 @@ module.exports = function (app) {
   };
 
   plugin.registerWithRouter = function (router) {
-    router.get('/races', (req, res) => {
+    // Signal K (2.x) puts every /plugins/<id>/... route behind admin
+    // authentication unless the plugin opens it up explicitly. These
+    // declare the access each route actually needs — reads for any signed-in
+    // (or read-only) client, changes for read/write ones — so the webapp also
+    // works for a non-admin token, e.g. behind signalk-navico-embedder on an
+    // MFD. Older servers have no router.access; routes then register on the
+    // plain router as before.
+    const readonly = typeof router.access === 'function' ? router.access('readonly') : router;
+    const readwrite = typeof router.access === 'function' ? router.access('readwrite') : router;
+
+    readonly.get('/races', (req, res) => {
       settleOverdueSchedules();
       const races = state.order.map((id) => raceSummary(state.races[id])).filter(Boolean);
       res.json({ currentRaceId: state.currentRaceId, races });
@@ -2321,7 +2331,7 @@ module.exports = function (app) {
       'https://overpass.kumi.systems/api/interpreter',
       'https://overpass.osm.ch/api/interpreter'
     ];
-    router.get('/overpass', async (req, res) => {
+    readonly.get('/overpass', async (req, res) => {
       const query = req.query.data;
       if (!query) return res.status(400).json({ error: 'Missing data query parameter' });
       // overpass-api.de has the best data but is also the most rate-
@@ -2365,7 +2375,7 @@ module.exports = function (app) {
       res.json(emptyResult || { elements: [] });
     });
 
-    router.post('/races', (req, res) => {
+    readwrite.post('/races', (req, res) => {
       const name = ((req.body && req.body.name) || '').trim();
       if (!name) {
         return res.status(400).json({ error: 'name is required' });
@@ -2395,7 +2405,7 @@ module.exports = function (app) {
       res.json({ currentRaceId: state.currentRaceId, race });
     });
 
-    router.get('/races/:id', (req, res) => {
+    readonly.get('/races/:id', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
@@ -2407,7 +2417,7 @@ module.exports = function (app) {
     // rows, same order as the webapp's table. ?tzOffsetMinutes=<n> should be
     // the exporting browser's own Date.prototype.getTimezoneOffset(), so
     // the Finish Time column reads in their local time, not the server's.
-    router.get('/races/:id/export.xlsx', async (req, res) => {
+    readonly.get('/races/:id/export.xlsx', async (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
@@ -2530,7 +2540,7 @@ module.exports = function (app) {
     // A standalone, self-contained backup timer: current boats/TCF/progress
     // baked in, everything else (start/stop, finishes, DNF, self-compare)
     // runs entirely client-side with no server — see buildOfflineTimerHtml.
-    router.get('/races/:id/export-offline.html', async (req, res) => {
+    readonly.get('/races/:id/export-offline.html', async (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
@@ -2584,7 +2594,7 @@ module.exports = function (app) {
       res.send(html);
     });
 
-    router.post('/races/:id/select', (req, res) => {
+    readwrite.post('/races/:id/select', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       state.currentRaceId = race.id;
@@ -2592,7 +2602,7 @@ module.exports = function (app) {
       res.json({ currentRaceId: state.currentRaceId });
     });
 
-    router.delete('/races/:id', (req, res) => {
+    readwrite.delete('/races/:id', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       disarmSchedule(race.id);
@@ -2605,7 +2615,7 @@ module.exports = function (app) {
       res.json({ currentRaceId: state.currentRaceId });
     });
 
-    router.post('/races/:id/start', (req, res) => {
+    readwrite.post('/races/:id/start', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       doStart(race, Date.now());
@@ -2617,7 +2627,7 @@ module.exports = function (app) {
     // never touches boats' finish times, DNF, or their own start-time
     // overrides. For backdating a late "Start Race" click, or fixing the
     // recorded start without losing everything else already entered.
-    router.put('/races/:id/startTime', (req, res) => {
+    readwrite.put('/races/:id/startTime', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const raw = req.body ? req.body.startTime : undefined;
@@ -2636,7 +2646,7 @@ module.exports = function (app) {
       res.json(raceWithEstimates(race));
     });
 
-    router.post('/races/:id/schedule', (req, res) => {
+    readwrite.post('/races/:id/schedule', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       if (race.startTime) {
@@ -2653,7 +2663,7 @@ module.exports = function (app) {
       res.json(raceWithEstimates(race));
     });
 
-    router.post('/races/:id/schedule/cancel', (req, res) => {
+    readwrite.post('/races/:id/schedule/cancel', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       race.scheduledStart = null;
@@ -2663,7 +2673,7 @@ module.exports = function (app) {
       res.json(raceWithEstimates(race));
     });
 
-    router.post('/races/:id/reset', (req, res) => {
+    readwrite.post('/races/:id/reset', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       disarmSchedule(race.id);
@@ -2692,7 +2702,7 @@ module.exports = function (app) {
     // / finish estimates stop), and every boat that hasn't finished is
     // marked DNF with its last known position — see doStop. Unlike Reset,
     // this doesn't touch boats, finish times, or the course.
-    router.post('/races/:id/stop', (req, res) => {
+    readwrite.post('/races/:id/stop', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       if (!race.startTime) return res.status(400).json({ error: 'Race has not started' });
@@ -2706,7 +2716,7 @@ module.exports = function (app) {
     // is not excluded from anyone's elapsed/corrected time. Every DNF'd boat
     // is un-DNF'd too, since calling the race back on means it's still live
     // (there's no separate tracking of "DNF'd by hand" vs "DNF'd by Stop").
-    router.post('/races/:id/resume', (req, res) => {
+    readwrite.post('/races/:id/resume', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       if (!race.stopTime) return res.status(400).json({ error: 'Race is not stopped' });
@@ -2725,7 +2735,7 @@ module.exports = function (app) {
     // Corrects the time of a call-off that has already happened (the clock
     // freezes at that time instead). Boats the call-off marked DNF stay so;
     // finishing them is a separate correction.
-    router.put('/races/:id/stopTime', (req, res) => {
+    readwrite.put('/races/:id/stopTime', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       if (!race.stopTime) return res.status(400).json({ error: 'Race is not called off' });
@@ -2741,7 +2751,7 @@ module.exports = function (app) {
 
     // Schedules an automatic call-off (same effect as Stop) at a future
     // time — mirrors /schedule for the start.
-    router.post('/races/:id/schedule-call-off', (req, res) => {
+    readwrite.post('/races/:id/schedule-call-off', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       if (race.stopTime) return res.status(400).json({ error: 'Race is already stopped' });
@@ -2755,7 +2765,7 @@ module.exports = function (app) {
       res.json(raceWithEstimates(race));
     });
 
-    router.post('/races/:id/schedule-call-off/cancel', (req, res) => {
+    readwrite.post('/races/:id/schedule-call-off/cancel', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       race.scheduledCallOff = null;
@@ -2767,7 +2777,7 @@ module.exports = function (app) {
     // Marks one boat as "self" so the webapp can show live/finished
     // comparisons (gap, or a countdown-to-catch-up) against every other
     // boat. Pass boatId: null to clear it.
-    router.put('/races/:id/self', (req, res) => {
+    readwrite.put('/races/:id/self', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boatId = (req.body && req.body.boatId) || null;
@@ -2781,7 +2791,7 @@ module.exports = function (app) {
     // "Save Course" form). Pass startLine/finishLine as `null` to clear a
     // line, or a [pointA, pointB] pair to set one; marks is the full
     // ordered replacement list.
-    router.put('/races/:id/course', (req, res) => {
+    readwrite.put('/races/:id/course', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const body = req.body || {};
@@ -2821,7 +2831,7 @@ module.exports = function (app) {
     // the committee can add/remove exactly who's racing; the webapp still
     // offers AIS and VET-register names as autocomplete suggestions when
     // adding one.
-    router.post('/races/:id/boats', (req, res) => {
+    readwrite.post('/races/:id/boats', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const name = ((req.body && req.body.name) || '').trim();
@@ -2866,7 +2876,7 @@ module.exports = function (app) {
       res.json(boat);
     });
 
-    router.delete('/races/:id/boats/:boatId', (req, res) => {
+    readwrite.delete('/races/:id/boats/:boatId', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       if (!getBoat(race, req.params.boatId)) return res.status(404).json({ error: 'No such boat' });
@@ -2882,7 +2892,7 @@ module.exports = function (app) {
     // boat's own start time by hand. A boat's own start time (if it has
     // one) still wins over its class's, same as it already won over the
     // race's single start time — see effectiveStartTime.
-    router.post('/races/:id/classes', (req, res) => {
+    readwrite.post('/races/:id/classes', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const name = ((req.body && req.body.name) || '').trim();
@@ -2894,7 +2904,7 @@ module.exports = function (app) {
       res.json(raceWithEstimates(race));
     });
 
-    router.put('/races/:id/classes/:classId', (req, res) => {
+    readwrite.put('/races/:id/classes/:classId', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
@@ -2911,7 +2921,7 @@ module.exports = function (app) {
 
     // Sets (or, with startTime: null, clears) this class's own start time —
     // same pattern as a boat's own start time.
-    router.put('/races/:id/classes/:classId/startTime', (req, res) => {
+    readwrite.put('/races/:id/classes/:classId/startTime', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
@@ -2931,7 +2941,7 @@ module.exports = function (app) {
       res.json(raceWithEstimates(race));
     });
 
-    router.delete('/races/:id/classes/:classId', (req, res) => {
+    readwrite.delete('/races/:id/classes/:classId', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       ensureRaceShape(race);
@@ -2945,7 +2955,7 @@ module.exports = function (app) {
     });
 
     // Sets (or, with classId: null, clears) a boat's class.
-    router.put('/races/:id/boats/:boatId/class', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/class', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -2961,7 +2971,7 @@ module.exports = function (app) {
 
     // Sets (or, with finishTime: null, clears) a boat's finish time to an
     // arbitrary timestamp, so race committee can correct a mistimed click.
-    router.put('/races/:id/boats/:boatId/finishTime', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/finishTime', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -2990,7 +3000,7 @@ module.exports = function (app) {
     // overriding the race's single start time for that boat only — for a
     // staggered/pursuit start, or correcting a boat that didn't actually
     // start with the fleet.
-    router.put('/races/:id/boats/:boatId/startTime', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/startTime', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3012,7 +3022,7 @@ module.exports = function (app) {
     // Marks (or, with dnf: false, un-marks) one boat DNF by hand, outside of
     // a full race call-off — e.g. a boat retires mid-race. Setting it also
     // clears any finish time and captures the boat's last known position.
-    router.put('/races/:id/boats/:boatId/dnf', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/dnf', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3036,7 +3046,7 @@ module.exports = function (app) {
     // started the race at all, as distinct from DNF (started but didn't
     // finish). Setting it also clears any finish time/DNF, since a boat
     // can't be more than one of finished/DNF/DNS at once.
-    router.put('/races/:id/boats/:boatId/dns', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/dns', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3060,7 +3070,7 @@ module.exports = function (app) {
     // AIS track-based detection — for a boat with no MMSI/AIS at all, or to
     // correct a rounding the automatic detection missed. See
     // countManualRoundedMarks/countRoundedMarks for how the two combine.
-    router.put('/races/:id/boats/:boatId/markTimes/:markId', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/markTimes/:markId', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3096,7 +3106,7 @@ module.exports = function (app) {
       res.json(boat);
     });
 
-    router.put('/races/:id/boats/:boatId/mmsi', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/mmsi', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3108,7 +3118,7 @@ module.exports = function (app) {
       res.json(boat);
     });
 
-    router.put('/races/:id/boats/:boatId/sailNumber', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/sailNumber', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3120,19 +3130,19 @@ module.exports = function (app) {
       res.json(boat);
     });
 
-    router.get('/boat-registry', (req, res) => {
+    readonly.get('/boat-registry', (req, res) => {
       res.json({ boats: Object.values(state.boatRegistry) });
     });
 
     // Plugin config setting (Server -> Plugin Config), not per-race and not
     // writable from the webapp — the webapp only reads it to know whether to
     // offer the VET-tall register at all.
-    router.get('/vet-enabled', (req, res) => {
+    readonly.get('/vet-enabled', (req, res) => {
       res.json({ enabled: isVetEnabled() });
     });
 
     // Same pattern as vet-enabled, for KTK's KLR register.
-    router.get('/ktk-enabled', (req, res) => {
+    readonly.get('/ktk-enabled', (req, res) => {
       res.json({ enabled: isKtkEnabled() });
     });
 
@@ -3142,7 +3152,7 @@ module.exports = function (app) {
     // publishCourseResources — silently returns none if this server has no
     // resources provider registered, rather than failing the whole course
     // editor over it.
-    router.get('/waypoints', async (req, res) => {
+    readonly.get('/waypoints', async (req, res) => {
       if (!app.resourcesApi || typeof app.resourcesApi.listResources !== 'function') {
         return res.json({ waypoints: [] });
       }
@@ -3169,7 +3179,7 @@ module.exports = function (app) {
     // layer to render and are left for a future version. The webapp falls
     // back to public OpenStreetMap/OpenSeaMap tiles when this returns none,
     // same as freeboard-sk itself does with no chart provider installed.
-    router.get('/charts', async (req, res) => {
+    readonly.get('/charts', async (req, res) => {
       if (!app.resourcesApi || typeof app.resourcesApi.listResources !== 'function') {
         return res.json({ charts: [] });
       }
@@ -3188,7 +3198,7 @@ module.exports = function (app) {
       }
     });
 
-    router.put('/races/:id/boats/:boatId/tcf', (req, res) => {
+    readwrite.put('/races/:id/boats/:boatId/tcf', (req, res) => {
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });
       const boat = getBoat(race, req.params.boatId);
@@ -3206,7 +3216,7 @@ module.exports = function (app) {
       res.json(boat);
     });
 
-    router.get('/handicap-source', async (req, res) => {
+    readonly.get('/handicap-source', async (req, res) => {
       try {
         const force = req.query.refresh === 'true' || req.query.refresh === '1';
         const data = await fetchHandicapBoats(force);
@@ -3216,7 +3226,7 @@ module.exports = function (app) {
       }
     });
 
-    router.get('/ktk-source', async (req, res) => {
+    readonly.get('/ktk-source', async (req, res) => {
       try {
         const force = req.query.refresh === 'true' || req.query.refresh === '1';
         const data = await fetchKtkBoats(force);
@@ -3229,13 +3239,13 @@ module.exports = function (app) {
     // Plugin config setting (Server -> Plugin Config), same pattern as
     // vet-enabled — the webapp only reads it to know whether to show the
     // import section at all.
-    router.get('/race-import-enabled', (req, res) => {
+    readonly.get('/race-import-enabled', (req, res) => {
       res.json({ enabled: isRaceImportEnabled() });
     });
 
     // Resolves a Manage2Sail event URL to its classes, so the webapp can
     // offer a picker before importing anything.
-    router.get('/import/manage2sail/classes', async (req, res) => {
+    readonly.get('/import/manage2sail/classes', async (req, res) => {
       if (!isRaceImportEnabled()) return res.status(403).json({ error: 'Race import is disabled in the plugin settings' });
       const eventUrl = ((req.query.eventUrl || '') + '').trim();
       if (!eventUrl) return res.status(400).json({ error: 'eventUrl is required' });
@@ -3250,7 +3260,7 @@ module.exports = function (app) {
     // The handicap systems this plugin can convert to a usable TCF — the
     // webapp uses this to label the disambiguation picker when a class's
     // system can't be resolved automatically (see resolveHandicapSystem).
-    router.get('/import/manage2sail/handicap-systems', (req, res) => {
+    readonly.get('/import/manage2sail/handicap-systems', (req, res) => {
       if (!isRaceImportEnabled()) return res.status(403).json({ error: 'Race import is disabled in the plugin settings' });
       res.json({ systems: HANDICAP_SYSTEMS.map((s) => ({ key: s.key, label: s.label })) });
     });
@@ -3263,7 +3273,7 @@ module.exports = function (app) {
     // to pick one explicitly for a class flagged in needsSystemChoice on a
     // prior call, rather than re-guessing. Re-importing updates TCF on
     // boats already added by name rather than duplicating them.
-    router.post('/races/:id/import/manage2sail', async (req, res) => {
+    readwrite.post('/races/:id/import/manage2sail', async (req, res) => {
       if (!isRaceImportEnabled()) return res.status(403).json({ error: 'Race import is disabled in the plugin settings' });
       const race = getRace(req.params.id);
       if (!race) return res.status(404).json({ error: 'No such race' });

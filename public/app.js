@@ -236,6 +236,24 @@
     return isFinite(ts) ? ts : null;
   }
 
+  // 401 and 403 mean different things and are worth telling apart: 401 is
+  // "not signed in" (no/expired/invalid credentials), 403 is "signed in, but
+  // this login isn't allowed to do that" (e.g. a read-only token trying to
+  // change something). Both name the path that failed, since "missing
+  // authentication" alone doesn't say which call it was or what to fix.
+  function httpErrorMessage(status, serverMsg, url, method) {
+    let where = String(url);
+    try {
+      where = new URL(url, window.location.href).pathname;
+    } catch (e) {
+      // keep the raw url
+    }
+    where = `${(method || 'GET').toUpperCase()} ${where}`;
+    if (status === 401) return `Not signed in (401) — ${where}`;
+    if (status === 403) return `Not allowed (403) — this login has no permission for ${where} (changing data needs a read/write login)`;
+    return serverMsg;
+  }
+
   async function fetchJSON(url, opts) {
     const res = await fetch(url, opts);
     if (!res.ok) {
@@ -246,7 +264,7 @@
       } catch (e) {
         // ignore
       }
-      const err = new Error(msg);
+      const err = new Error(httpErrorMessage(res.status, msg, url, opts && opts.method));
       err.status = res.status;
       throw err;
     }
@@ -488,7 +506,7 @@
       }
       setStatus('');
     } catch (e) {
-      setStatus('Could not reach race-control plugin: ' + e.message, true);
+      setStatus(e.status ? e.message : 'Could not reach race-control plugin: ' + e.message, true);
     }
   }
 

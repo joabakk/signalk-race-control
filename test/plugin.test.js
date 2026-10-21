@@ -499,3 +499,69 @@ describe('after-the-fact corrections', () => {
     assert.equal(after.boats[boat.id].finishTime, finish);
   });
 });
+
+describe('route access levels (Signal K router.access)', () => {
+  // Mirrors the server's asPluginRouter: router.access(level) returns a
+  // registrar whose get/post/put/delete record the level they were declared
+  // with. Anything registered on the bare router is recorded as "direct" —
+  // that would be admin-only on a real server.
+  function makeAccessRouter() {
+    const recorded = [];
+    const registrarFor = (level) => {
+      const reg = (method) => (routePath) => {
+        recorded.push({ method, path: routePath, level });
+        return registrar;
+      };
+      const registrar = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), delete: reg('DELETE') };
+      return registrar;
+    };
+    const direct = (method) => (routePath) => recorded.push({ method, path: routePath, level: 'direct' });
+    return {
+      recorded,
+      access: registrarFor,
+      get: direct('GET'),
+      post: direct('POST'),
+      put: direct('PUT'),
+      delete: direct('DELETE')
+    };
+  }
+
+  const register = (router) => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'race-control-test-'));
+    const plugin = pluginFactory(makeApp(dataDir));
+    plugin.start({});
+    plugin.registerWithRouter(router);
+    plugin.stop();
+  };
+
+  test('every route is declared readonly (GET) or readwrite (everything else), none left admin-only', () => {
+    const router = makeAccessRouter();
+    register(router);
+    assert.ok(router.recorded.length > 40, 'routes were registered');
+    assert.deepEqual(router.recorded.filter((r) => r.level === 'direct'), []);
+    for (const r of router.recorded) {
+      assert.equal(r.level, r.method === 'GET' ? 'readonly' : 'readwrite', `${r.method} ${r.path}`);
+    }
+  });
+
+  test('spot checks: reads and downloads are readonly, state changes are readwrite', () => {
+    const router = makeAccessRouter();
+    register(router);
+    const level = (method, p) => router.recorded.find((r) => r.method === method && r.path === p).level;
+    assert.equal(level('GET', '/races'), 'readonly');
+    assert.equal(level('GET', '/races/:id'), 'readonly');
+    assert.equal(level('GET', '/races/:id/export.xlsx'), 'readonly');
+    assert.equal(level('GET', '/overpass'), 'readonly');
+    assert.equal(level('POST', '/races/:id/start'), 'readwrite');
+    assert.equal(level('PUT', '/races/:id/boats/:boatId/finishTime'), 'readwrite');
+    assert.equal(level('DELETE', '/races/:id'), 'readwrite');
+  });
+
+  test('falls back to the plain router when the server has no router.access', () => {
+    const router = makeRouter(); // no .access
+    register(router);
+    assert.ok(router._routes.length > 40);
+    assert.ok(router._routes.some((r) => r.method === 'GET' && r.pattern.test('/races')));
+    assert.ok(router._routes.some((r) => r.method === 'POST' && r.pattern.test('/races/x/start')));
+  });
+});

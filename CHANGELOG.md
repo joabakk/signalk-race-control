@@ -2,6 +2,12 @@
 
 All notable changes to `signalk-race-control`, newest first.
 
+## 0.12.12 (2026-10-21)
+- Declare access levels for every plugin route with Signal K's `router.access()`: `GET` is `readonly`, everything else `readwrite`. Signal K 2.x makes undeclared `/plugins/<id>/...` routes admin-only, which broke the webapp for non-admin tokens (e.g. behind signalk-navico-embedder on an MFD). Falls back to the plain router on servers without `router.access`; the reserved `/config` route is unchanged
+- The webapp now tells 401 ("Not signed in") from 403 ("Not allowed") and names the method and path that failed; the MFD tile shows "no data" for an empty result and only reports real access errors
+- README: route/access table and the embedder's `extraPluginPaths` (`race-control`)
+- Tests for the registered access levels
+
 ## 0.12.11 (2026-10-18)
 - A scheduled race whose start time has passed untouched is now taken as started at that time (backstop to the start timer, checked every tick and whenever a race is read)
 - A scheduled call-off whose time has passed untouched is likewise taken as having happened at that time

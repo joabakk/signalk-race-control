@@ -329,6 +329,42 @@ Corrected time is shown live throughout the race (using elapsed-so-far), and fre
 once a boat's finish time is recorded. The **Est. finish** column shows a projected
 finish time/rank for boats still racing, when the plugin has enough to estimate one.
 
+## Access levels, and running behind an MFD (signalk-navico-embedder)
+
+Signal K (2.x) makes every `/plugins/<id>/...` route admin-only unless the plugin
+declares otherwise. This plugin declares what each route needs, using the server's
+`router.access()`: **reads** (every `GET`, including the Excel/offline-timer downloads
+and the OpenSeaMap proxy) need only a signed-in or read-only login, and **changes**
+(`POST`/`PUT`/`DELETE`) need a read/write login — no admin. So the webapp works with
+a non-admin device token, which is what an embedder such as
+`signalk-navico-embedder` injects. (On
+servers without `router.access` the routes fall back to the old admin-only behaviour.)
+The reserved `/config` route is not affected and stays admin-only.
+
+| Routes under `/plugins/race-control` | Method | Access |
+| --- | --- | --- |
+| `/races`, `/races/:id`, `/races/:id/export.xlsx`, `/races/:id/export-offline.html`, `/boat-registry`, `/vet-enabled`, `/ktk-enabled`, `/race-import-enabled`, `/handicap-source`, `/ktk-source`, `/waypoints`, `/charts`, `/overpass`, `/import/manage2sail/classes`, `/import/manage2sail/handicap-systems` | GET | readonly |
+| create/select/delete a race; start, stop, resume, reset; schedule and call-off (scheduling, cancelling, correcting the call-off time); course, self boat | POST, PUT, DELETE | readwrite |
+| boats, classes and their fields (class, TCF, sail number, MMSI, start/finish times, DNF/DNS, mark roundings); Manage2Sail import | POST, PUT, DELETE | readwrite |
+
+The webapp calls every one of these, so all of them must be reachable through the
+embedder. It also reads the open Signal K API (`/signalk/v1/api/vessels/...` for position,
+speed and wind), and the optional buddy-list button writes to
+`/signalk/v2/api/resources/buddies`. `mfd-tile.html` only reads
+`/signalk/v1/api/vessels/self/...`.
+
+The plugin id (`race-control`) is the `/plugins/` path segment, and differs from the
+webapp's own path (`/signalk-race-control/`), so the embedder needs it listed in its
+`extraPluginPaths` setting:
+
+```json
+{ "extraPluginPaths": ["race-control"] }
+```
+
+The webapp tells the two failures apart: **401** is shown as "Not signed in", **403** as
+"Not allowed" (a login without permission for that call), each with the method and path
+that failed; an empty result is shown as "no data", not as an error.
+
 ## Notes
 
 - All race state (names, schedules, boats, TCF, finish times, course, recorded
