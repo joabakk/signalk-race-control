@@ -367,7 +367,7 @@ that failed; an empty result is shown as "no data", not as an error.
 
 ## Small screens (MFD tiles)
 
-Below 900px wide the boats table switches to a compact layout: each boat is one row
+Below 1400px wide (the full table is about 1350px wide) the boats table switches to a compact layout: each boat is one row
 with its name (sail number underneath), elapsed, corrected and finish time. Tap a row
 to open its other fields (class, TCF, MMSI, start time, marks, DNF/DNS, remove); a
 "⋯ More" button in the header reveals the export buttons and the start/call-off

@@ -2,6 +2,10 @@
 
 All notable changes to `signalk-race-control`, newest first.
 
+## 0.12.14 (2026-10-22)
+- Compact layout now switches on below 1400px wide (was 900px): the full boats table is about 1350px wide, so it didn't fit an MFD tile with a data bar beside it (measured on a Zeus 3S: 1033px of 1280px). Tuned on that screen
+- `?debug` shows a small readout of the viewport the browser reports (inner/screen/document size, pixel ratio, compact on/off)
+
 ## 0.12.13 (2026-10-22)
 - Compact layout for small screens such as an MFD browser tile: the boats table shows just boat (with sail number), elapsed, corrected and finish time per row, and tapping a row opens the rest of its fields; the header folds its extra controls behind "More". Automatic below 900px wide, forced with `?compact` (off with `?compact=0`)
 

@@ -8,13 +8,31 @@
   // rest). On automatically for a narrow viewport, forced on by ?compact —
   // an MFD browser may report a wide viewport — and off by ?compact=0.
   const compactParam = new URLSearchParams(window.location.search).get('compact');
-  const compactQuery = window.matchMedia ? window.matchMedia('(max-width: 900px)') : null;
+  const compactQuery = window.matchMedia ? window.matchMedia('(max-width: 1399px)') : null;
   function applyCompact() {
     const on = compactParam === '0' ? false : compactParam !== null || !!(compactQuery && compactQuery.matches);
     document.documentElement.classList.toggle('compact', on);
   }
   applyCompact();
   if (compactQuery && compactQuery.addEventListener) compactQuery.addEventListener('change', applyCompact);
+  // ?debug: a fixed readout of what the browser reports, to see on a real
+  // device (e.g. an MFD with a data bar that shrinks the browser area)
+  // whether the viewport follows the visible area.
+  if (new URLSearchParams(window.location.search).has('debug')) {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;top:0;right:0;z-index:99999;background:#000c;color:#fff;font:12px/1.3 monospace;padding:4px 6px;pointer-events:none;white-space:pre';
+    const update = () => {
+      box.textContent =
+        'inner ' + window.innerWidth + 'x' + window.innerHeight + ' @' + window.devicePixelRatio + '\n' +
+        'screen ' + screen.width + 'x' + screen.height + '\n' +
+        'doc ' + document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight + '\n' +
+        'compact ' + document.documentElement.classList.contains('compact');
+    };
+    update();
+    window.addEventListener('resize', update);
+    setInterval(update, 1000);
+    document.body.appendChild(box);
+  }
   document.getElementById('compactMoreBtn').addEventListener('click', (e) => {
     const open = document.documentElement.classList.toggle('show-more');
     e.currentTarget.setAttribute('aria-expanded', String(open));
