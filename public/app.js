@@ -3,6 +3,23 @@
   const SK_API = '/signalk/v1/api';
   const SK_API_V2 = '/signalk/v2/api';
 
+  // Compact layout, for small screens such as an MFD's browser tile: just
+  // boat, elapsed, corrected and finish time per row (tap a row for the
+  // rest). On automatically for a narrow viewport, forced on by ?compact —
+  // an MFD browser may report a wide viewport — and off by ?compact=0.
+  const compactParam = new URLSearchParams(window.location.search).get('compact');
+  const compactQuery = window.matchMedia ? window.matchMedia('(max-width: 900px)') : null;
+  function applyCompact() {
+    const on = compactParam === '0' ? false : compactParam !== null || !!(compactQuery && compactQuery.matches);
+    document.documentElement.classList.toggle('compact', on);
+  }
+  applyCompact();
+  if (compactQuery && compactQuery.addEventListener) compactQuery.addEventListener('change', applyCompact);
+  document.getElementById('compactMoreBtn').addEventListener('click', (e) => {
+    const open = document.documentElement.classList.toggle('show-more');
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+  });
+
   let races = []; // race summaries from GET /races
   let activeRaceId = null;
   let raceState = null; // full race object for activeRaceId, or null
@@ -2661,9 +2678,23 @@
     const nameSpan = document.createElement('span');
     nameSpan.className = 'boat-name-text';
 
+    // Compact layout only: the sail number under the name, and a chevron
+    // showing the row can be tapped open for the rest of its fields.
+    const sailSub = document.createElement('span');
+    sailSub.className = 'boat-sail-sub';
+    const rowToggle = document.createElement('span');
+    rowToggle.className = 'row-toggle';
+    rowToggle.setAttribute('aria-hidden', 'true');
+
     const tdName = document.createElement('td');
     tdName.className = 'boat-name-col';
-    tdName.append(selfBtn, nameSpan);
+    tdName.append(selfBtn, nameSpan, rowToggle, sailSub);
+
+    tr.addEventListener('click', (e) => {
+      if (!document.documentElement.classList.contains('compact')) return;
+      if (e.target.closest('input, select, button, label, a')) return;
+      tr.classList.toggle('expanded');
+    });
 
     const sailNumberInput = document.createElement('input');
     sailNumberInput.type = 'text';
@@ -2884,6 +2915,7 @@
       tr,
       selfBtn,
       nameSpan,
+      sailSub,
       tdMarks,
       marksSignature: undefined,
       marksPills: [],
@@ -3105,6 +3137,7 @@
       row.tr.classList.toggle('finished', !!b.finishTime);
       row.tr.classList.toggle('dnf', !!b.dnf || !!b.dns);
       row.nameSpan.textContent = b.name;
+      row.sailSub.textContent = b.sailNumber || '';
       const isSelf = b.boatId === raceState.selfBoatId;
       row.selfBtn.textContent = isSelf ? '★' : '☆';
       row.selfBtn.classList.toggle('active', isSelf);

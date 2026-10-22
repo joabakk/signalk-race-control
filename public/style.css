@@ -892,3 +892,155 @@ tbody tr.dnf td {
   text-align: center;
   margin-top: 2rem;
 }
+
+/* ---- Compact layout -------------------------------------------------
+   For small screens (an MFD's browser tile): the boats table shrinks to
+   boat, elapsed, corrected and finish time, one grid row per boat; tapping
+   a row opens everything else under it as a labelled list. Switched on by
+   the "compact" class on <html> (see applyCompact in app.js). */
+.compact-only,
+.boat-sail-sub,
+.row-toggle {
+  display: none;
+}
+
+html.compact .compact-only {
+  display: inline-block;
+}
+
+/* Header: just the race picker and the clock/start controls; the rest
+   (export, timing fields, register status) behind "More". */
+html.compact header {
+  padding: 0.5rem 0.75rem;
+}
+html.compact header h1 {
+  display: none;
+}
+html.compact .clock {
+  font-size: 2rem;
+  margin: 0.2rem 0;
+}
+html.compact:not(.show-more) #exportBtn,
+html.compact:not(.show-more) #exportOfflineBtn,
+html.compact:not(.show-more) #deleteRaceBtn,
+html.compact:not(.show-more) .race-start-row,
+html.compact:not(.show-more) .schedule-row,
+html.compact:not(.show-more) #vetStatusLine,
+html.compact:not(.show-more) #ktkStatusLine {
+  display: none;
+}
+html.compact main {
+  padding: 0.5rem 0.75rem;
+}
+html.compact .add-boat-row {
+  flex-wrap: wrap;
+}
+
+/* Boats table: one grid per row, so the four kept columns line up. */
+html.compact .table-scroll {
+  overflow-x: visible;
+}
+html.compact #boatsTable,
+html.compact #boatsTable thead,
+html.compact #boatsTable tbody {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+html.compact #boatsTable tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.8rem 5.4rem 11.5rem;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+html.compact #boatsTable th,
+html.compact #boatsTable td {
+  border-bottom: none;
+  padding: 0.35rem 0.4rem;
+  order: 10;
+}
+html.compact #boatsTable thead th {
+  font-size: 0.65rem;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+/* Keep only boat (1), elapsed (8), corrected (9), finish (13) in the row. */
+html.compact #boatsTable th:nth-child(1), html.compact #boatsTable td:nth-child(1) { order: 1; }
+html.compact #boatsTable th:nth-child(8), html.compact #boatsTable td:nth-child(8) { order: 2; }
+html.compact #boatsTable th:nth-child(9), html.compact #boatsTable td:nth-child(9) { order: 3; }
+html.compact #boatsTable th:nth-child(13), html.compact #boatsTable td:nth-child(13) { order: 4; }
+html.compact #boatsTable thead th:not(:nth-child(1)):not(:nth-child(8)):not(:nth-child(9)):not(:nth-child(13)),
+html.compact #boatsTable tbody td:not(:nth-child(1)):not(:nth-child(8)):not(:nth-child(9)):not(:nth-child(13)) {
+  display: none;
+}
+html.compact #boatsTable .boat-name-col {
+  position: static;
+  background: transparent;
+  line-height: 1.15;
+}
+html.compact #boatsTable .boat-name-text {
+  font-weight: 600;
+}
+html.compact #boatsTable .boat-sail-sub:empty {
+  display: none;
+}
+html.compact #boatsTable .boat-sail-sub {
+  display: block;
+  margin-left: 1.6rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+html.compact #boatsTable .row-toggle {
+  display: inline-block;
+  margin-left: 0.4rem;
+  color: var(--muted);
+}
+html.compact #boatsTable .row-toggle::before {
+  content: '\25B8';
+}
+html.compact #boatsTable tr.expanded .row-toggle::before {
+  content: '\25BE';
+}
+html.compact #boatsTable td:nth-child(8),
+html.compact #boatsTable td:nth-child(9) {
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+html.compact #boatsTable .finish-time-input {
+  width: 7.8rem;
+}
+/* The finish cell keeps the time and "Now"; Clear, DNF and DNS wait for
+   the expanded row. Undo-DNF stays, since it's how a DNF is reverted. */
+html.compact #boatsTable tr:not(.expanded) .finish-cell button:not(.finish-now-btn):not(.undo-dnf-btn),
+html.compact #boatsTable tr:not(.expanded) .dnf-pos {
+  display: none;
+}
+
+/* Expanded: every other cell as a labelled full-width line under the row. */
+html.compact #boatsTable tbody tr.expanded td:not(:nth-child(1)):not(:nth-child(8)):not(:nth-child(9)):not(:nth-child(13)) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  padding: 0.25rem 0.4rem 0.25rem 1.6rem;
+}
+html.compact #boatsTable tbody tr.expanded td::before {
+  display: inline-block;
+  width: 6.5rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+html.compact #boatsTable tbody tr.expanded td:nth-child(2)::before { content: 'Sail #'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(3)::before { content: 'MMSI'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(4)::before { content: 'TCF'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(5)::before { content: 'Handicap'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(6)::before { content: 'Class'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(7)::before { content: 'Start'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(10)::before { content: 'Marks'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(11)::before { content: 'Est. finish'; }
+html.compact #boatsTable tbody tr.expanded td:nth-child(12)::before { content: 'vs Self'; }

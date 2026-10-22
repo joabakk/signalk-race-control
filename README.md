@@ -365,6 +365,15 @@ The webapp tells the two failures apart: **401** is shown as "Not signed in", **
 "Not allowed" (a login without permission for that call), each with the method and path
 that failed; an empty result is shown as "no data", not as an error.
 
+## Small screens (MFD tiles)
+
+Below 900px wide the boats table switches to a compact layout: each boat is one row
+with its name (sail number underneath), elapsed, corrected and finish time. Tap a row
+to open its other fields (class, TCF, MMSI, start time, marks, DNF/DNS, remove); a
+"⋯ More" button in the header reveals the export buttons and the start/call-off
+fields. An MFD browser may report a wide viewport, so add `?compact` to the tile's URL
+to force it (`?compact=0` forces the full layout).
+
 ## Notes
 
 - All race state (names, schedules, boats, TCF, finish times, course, recorded

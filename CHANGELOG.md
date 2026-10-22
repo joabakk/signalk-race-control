@@ -2,6 +2,9 @@
 
 All notable changes to `signalk-race-control`, newest first.
 
+## 0.12.13 (2026-10-22)
+- Compact layout for small screens such as an MFD browser tile: the boats table shows just boat (with sail number), elapsed, corrected and finish time per row, and tapping a row opens the rest of its fields; the header folds its extra controls behind "More". Automatic below 900px wide, forced with `?compact` (off with `?compact=0`)
+
 ## 0.12.12 (2026-10-21)
 - Declare access levels for every plugin route with Signal K's `router.access()`: `GET` is `readonly`, everything else `readwrite`. Signal K 2.x makes undeclared `/plugins/<id>/...` routes admin-only, which broke the webapp for non-admin tokens (e.g. behind signalk-navico-embedder on an MFD). Falls back to the plain router on servers without `router.access`; the reserved `/config` route is unchanged
 - The webapp now tells 401 ("Not signed in") from 403 ("Not allowed") and names the method and path that failed; the MFD tile shows "no data" for an empty result and only reports real access errors
